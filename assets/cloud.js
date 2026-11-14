@@ -85,11 +85,16 @@
     if (!base) throw new Error('缺少 Supabase 地址');
     if (!cfg.key) throw new Error('缺少 Supabase anon key');
 
+    // 兼容两种 key：老版 anon public（JWT，eyJ...）和新版 publishable（sb_publishable_...）
+    // 新版 publishable key 不是 JWT，放进 Authorization 会被拒，只放 apikey 头即可
+    var isPublishable = /^sb_publishable_/.test(String(cfg.key || ''));
     var headers = {
       apikey: cfg.key,
-      Authorization: 'Bearer ' + cfg.key,
       'Content-Type': 'application/json'
     };
+    if (!isPublishable) {
+      headers.Authorization = 'Bearer ' + cfg.key;
+    }
 
     function fail(prefix, res) {
       return res.text().then(function (body) {

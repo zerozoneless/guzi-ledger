@@ -339,7 +339,8 @@
       '</div>' +
       '</section>';
 
-    if (shouldWarnBackup()) {
+    // 开了云同步就不必再提示「数据只在本机」
+    if (!DB.syncEnabled() && shouldWarnBackup()) {
       html +=
         '<div class="search-wrap" style="margin-top:12px"><div class="notice">' +
         '<span>💾</span><span><strong>建议做一次备份。</strong>数据只存在当前浏览器里，清除缓存或换设备会丢失。到「设置」导出备份文件即可。</span>' +

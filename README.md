@@ -70,6 +70,39 @@ node tools/mock-supabase.js 54321
 #   房间码：r1
 ```
 
+### 分享给别人：一键配置链接
+
+配置好云同步后，设置页多出「分享给其他人 → 复制链接」。这条链接把三个配置值编码在里面，别人打开就自动配好，不用手输 key：
+
+```
+https://你的网址/?c=eyJ1IjoiaHR0cHM6Ly9...
+```
+
+打开后地址栏会自动清掉那串参数，配置保存在本机。
+
+> **这条链接就是钥匙**，拿到它的人能读写你的账本。别发到公开群、别贴到公开仓库。
+
+## 部署到公网（GitHub Pages）
+
+`127.0.0.1` 只有本机能访问，要给店里其他人用必须放到公网。GitHub Pages 免费：
+
+```bash
+# 先在 GitHub 上建一个空仓库（Public），例如 guzi-ledger，然后把地址填进下面
+git remote add origin https://github.com/<你的用户名>/guzi-ledger.git
+git branch -M main
+git push -u origin main
+```
+
+推送后在仓库页 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main` / `(root)`，Save。等 1～2 分钟，得到：
+
+```
+https://<你的用户名>.github.io/guzi-ledger/
+```
+
+打开它 → 设置云同步（或粘贴一键配置链接）→ 再点「复制链接」发出的就是公网链接了。
+
+> `*.github.io` 在国内偶尔不稳。如果店里手机打不开，换 **Cloudflare Pages**（拖拽上传，免费）或腾讯云 EdgeOne（国内节点快）。
+
 ## 怎么打开
 
 - **本机**：双击 `index.html`

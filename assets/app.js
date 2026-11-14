@@ -35,7 +35,7 @@
 
   /* ================================================================ 云同步 */
 
-  var syncState = { status: 'off', lastAt: 0, error: '', busy: false, timer: null };
+  var syncState = { status: 'off', lastAt: 0, error: '', busy: false, timer: null, pushed: 0, pulled: 0 };
 
   function syncStatusText() {
     if (!DB.syncEnabled()) return '未开启，数据只在这台设备上';
@@ -44,7 +44,11 @@
     if (!syncState.lastAt) return '已开启，等待首次同步';
     var diff = Math.round((Date.now() - syncState.lastAt) / 1000);
     var when = diff < 60 ? '刚刚' : diff < 3600 ? Math.floor(diff / 60) + ' 分钟前' : Math.floor(diff / 3600) + ' 小时前';
-    return '已开启 · ' + when + '同步过';
+    var detail = '（上传 ' + syncState.pushed + ' 条 · 拉取 ' + syncState.pulled + ' 条）';
+    var empty = syncState.pushed === 0 && syncState.pulled === 0
+      ? '｜本机和云端都是空的，先加一位客户试试'
+      : '';
+    return '已开启 · ' + when + '同步过' + detail + empty;
   }
 
   function scheduleSync() {
@@ -65,8 +69,14 @@
         syncState.status = 'idle';
         syncState.lastAt = Date.now();
         syncState.error = '';
+        syncState.pushed = r.pushed;
+        syncState.pulled = r.pulled;
         syncState.busy = false;
-        if (!o.silent) toast('已同步：上传 ' + r.pushed + ' 条');
+        if (!o.silent) {
+          if (r.pushed === 0 && r.pulled === 0) toast('本机还没有任何数据，先去首页加一位客户');
+          else if (r.pushed === 0) toast('已同步：没有新记录要上传，拉取了 ' + r.pulled + ' 条');
+          else toast('已同步：上传 ' + r.pushed + ' 条');
+        }
         if (!openDialogEl) render({ keepScroll: true });
         return r;
       })
@@ -120,6 +130,66 @@
         return null;
       }
     });
+  }
+
+  /* ================================================================ 一键配置链接 */
+
+  function b64urlEncode(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function b64urlDecode(s) {
+    var b = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    var bin = atob(b);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  function shareLink() {
+    var cfg = DB.syncConfig();
+    if (!cfg.url || !cfg.key || !cfg.room) return '';
+    var payload = b64urlEncode(JSON.stringify({ u: cfg.url, k: cfg.key, r: cfg.room }));
+    return location.origin + location.pathname + '?c=' + payload;
+  }
+
+  function readConfigFromUrl() {
+    var m = /[?&]c=([A-Za-z0-9\-_]+)/.exec(location.search || '');
+    if (!m) return null;
+    try {
+      var obj = JSON.parse(b64urlDecode(m[1]));
+      if (obj && obj.u && obj.k && obj.r) {
+        return { url: String(obj.u), key: String(obj.k), room: String(obj.r) };
+      }
+    } catch (e) {
+      console.warn('[谷子账本] 链接里的配置解析失败', e);
+    }
+    return null;
+  }
+
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); toast('已复制到剪贴板'); }
+      catch (e) { toast('复制失败，请手动选中', true); }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        toast('已复制到剪贴板');
+      }, fallback);
+    } else {
+      fallback();
+    }
   }
 
   /* ================================================================ 工具 */
@@ -628,6 +698,11 @@
       '<div class="set-hint">数据存到云端，换手机、多人记账都不丢</div></div>' +
       '<button type="button" class="btn btn--sm ' + (DB.syncEnabled() ? 'btn--ghost' : 'btn--primary') + '" data-act="sync-config">' +
       (DB.syncEnabled() ? '修改' : '设置') + '</button></div>' +
+      (DB.syncEnabled()
+        ? '<div class="set-row"><div><div class="set-label">分享给其他人</div>' +
+          '<div class="set-hint">复制一条链接，对方打开就自动配好，不用手输 key</div></div>' +
+          '<button type="button" class="btn btn--sm btn--ghost" data-act="share-link">复制链接</button></div>'
+        : '') +
       (DB.syncEnabled()
         ? '<div class="set-row"><div><div class="set-label">关闭同步</div><div class="set-hint">只影响这台设备，不会删除云端数据</div></div>' +
           '<button type="button" class="btn btn--sm btn--danger" data-act="sync-off">关闭</button></div>'
@@ -1207,6 +1282,18 @@
         doSync({});
         break;
 
+      case 'share-link':
+        if (location.protocol === 'file:') {
+          toast('先部署到网址上，才能生成可分享的链接', true);
+          break;
+        }
+        if (!DB.syncEnabled()) {
+          toast('先配置云同步，才有链接可分享', true);
+          break;
+        }
+        copyText(shareLink());
+        break;
+
       case 'sync-off':
         askConfirm({
           title: '关闭云同步？',
@@ -1304,6 +1391,15 @@
 
   DB.init();
 
+  // 带配置的一次性链接：打开即自动配好云同步
+  var linkCfg = readConfigFromUrl();
+  if (linkCfg) {
+    DB.setSyncConfig(linkCfg);
+    try {
+      history.replaceState({}, '', location.pathname + location.hash);
+    } catch (e) {}
+  }
+
   // 任何写操作都自动挂上「稍后同步」
   ['addCustomer', 'updateCustomer', 'deleteCustomer', 'addTxn', 'updateTxn', 'setVoid', 'deleteTxn', 'clearAll', 'seedDemo', 'importJSON'].forEach(function (name) {
     var orig = DB[name];
@@ -1319,6 +1415,8 @@
   }
 
   render();
+
+  if (linkCfg) toast('已自动配好云同步');
 
   // 已配置云同步的话，启动时先拉一次最新的
   if (DB.syncEnabled()) {

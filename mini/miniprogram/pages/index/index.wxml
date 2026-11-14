@@ -1,0 +1,74 @@
+<view class="page-pad">
+
+  <!-- 加入账本 -->
+  <block wx:if="{{needJoin}}">
+    <view class="hero">
+      <view class="hero-label">加入账本</view>
+      <view class="hero-value" style="font-size:46rpx;letter-spacing:0">输入邀请码</view>
+      <view class="hero-meta">向店长索取 6 位邀请码，加入后与其他人共用同一本账</view>
+    </view>
+    <view class="card" style="padding:30rpx">
+      <input class="text-input" placeholder="例如：K7M2QP" value="{{joinCode}}" bindinput="onJoinInput" maxlength="6" />
+      <view class="sheet-actions">
+        <view class="btn btn-primary" bindtap="join">加入</view>
+      </view>
+    </view>
+  </block>
+
+  <!-- 加载中 -->
+  <view class="loading" wx:elif="{{loading}}">加载中…</view>
+
+  <!-- 出错 -->
+  <view class="empty" wx:elif="{{error}}">
+    <view class="ico">⚠️</view>
+    <view class="t">加载失败</view>
+    <view class="d">{{error}}</view>
+    <view class="sheet-actions" style="margin-top:40rpx">
+      <view class="btn btn-primary" bindtap="load">重试</view>
+    </view>
+  </view>
+
+  <!-- 正常 -->
+  <block wx:else>
+    <view class="hero">
+      <view class="hero-label">合计未兑付余额</view>
+      <view class="hero-value"><text class="unit">{{totalUnit}}</text>{{totalText}}</view>
+      <view class="hero-meta">
+        <text>{{countText}}</text>
+        <text>本月净变动 <text class="{{monthNetTone}}">{{monthNetText}}</text></text>
+      </view>
+    </view>
+
+    <view class="search">
+      <text class="ico">🔍</text>
+      <input placeholder="搜索客户名称或备注" value="{{query}}" bindinput="onQuery" confirm-type="search" />
+    </view>
+
+    <view class="section-head">
+      <text>客户（{{filtered.length}}）</text>
+      <text class="sub">{{roomName}}</text>
+    </view>
+
+    <view wx:if="{{filtered.length}}">
+      <view class="cust-card" wx:for="{{filtered}}" wx:key="id" data-id="{{item.id}}" bindtap="openCustomer">
+        <view class="avatar {{item.g}}">{{item.initial}}</view>
+        <view class="cust-main">
+          <view class="cust-name">
+            <text>{{item.name}}</text>
+            <text class="badge" wx:if="{{item.owed}}">欠款</text>
+          </view>
+          <view class="cust-meta">{{item.meta}}</view>
+        </view>
+        <view class="cust-balance {{item.tone}}">{{item.balance}}</view>
+      </view>
+    </view>
+
+    <view class="empty" wx:else>
+      <view class="ico">🗂️</view>
+      <view class="t">还没有客户</view>
+      <view class="d">点右下角的 + 添加第一位客户，之后每笔加钱、减钱都记在他名下</view>
+    </view>
+  </block>
+</view>
+
+<view class="fab" wx:if="{{!needJoin && !loading && !error}}" bindtap="addCustomer">+</view>

@@ -1,0 +1,9 @@
+{
+  "name": "ledger",
+  "version": "1.0.0",
+  "description": "谷子账本云函数：所有数据读写都走这里，客户端不直连数据库",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

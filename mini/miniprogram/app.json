@@ -1,0 +1,31 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/customer/customer",
+    "pages/report/report",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#F5F1E8",
+    "navigationBarTitleText": "谷子账本",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F5F1E8",
+    "backgroundColorTop": "#F5F1E8",
+    "backgroundColorBottom": "#F5F1E8"
+  },
+  "tabBar": {
+    "color": "#A9A294",
+    "selectedColor": "#43407A",
+    "backgroundColor": "#FFFDF9",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "客户" },
+      { "pagePath": "pages/report/report", "text": "报表" },
+      { "pagePath": "pages/settings/settings", "text": "设置" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

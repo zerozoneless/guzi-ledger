@@ -1,0 +1,141 @@
+<view class="page-pad">
+
+  <view class="loading" wx:if="{{loading}}">加载中…</view>
+
+  <view class="empty" wx:elif="{{error}}">
+    <view class="ico">🤔</view>
+    <view class="t">{{error}}</view>
+  </view>
+
+  <block wx:else>
+    <!-- 余额 -->
+    <view class="card detail-hero">
+      <view style="display:flex;align-items:center;gap:20rpx">
+        <view class="avatar {{g}}">{{initial}}</view>
+        <view style="flex:1;min-width:0">
+          <view class="detail-name">{{name}}</view>
+          <view class="detail-sub">{{note || '没有备注'}}</view>
+        </view>
+        <view style="padding:12rpx 16rpx" bindtap="more">⋯</view>
+      </view>
+
+      <view class="balance-label">当前余额</view>
+      <view class="balance-big {{tone}}"><text class="unit">{{balanceUnit}}</text>{{balanceText}}</view>
+
+      <view class="mini-stats">
+        <view class="mini-stat">
+          <view class="k">累计加钱</view>
+          <view class="v is-plus">{{inflowText}}</view>
+        </view>
+        <view class="mini-stat">
+          <view class="k">累计减钱</view>
+          <view class="v is-minus">{{outflowText}}</view>
+        </view>
+        <view class="mini-stat">
+          <view class="k">记账笔数</view>
+          <view class="v">{{countText}}</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 算式 -->
+    <view class="eq-card">
+      <view class="eq-head">
+        <text>账目算式</text>
+        <text>{{terms.length}} 笔</text>
+      </view>
+      <view class="eq-row">
+        <scroll-view class="eq-scroll" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+          <view class="eq-inner">
+            <view wx:for="{{terms}}" wx:key="id" class="eq-term {{item.tone}}">{{item.text}}</view>
+            <view class="eq-hint" wx:if="{{!terms.length}}" style="padding:0">还没有记录</view>
+          </view>
+        </scroll-view>
+        <view class="eq-tail">
+          <text class="eq-eq">=</text>
+          <text class="eq-total">{{totalText}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 明细 -->
+    <view class="section-head">
+      <text>账目明细</text>
+      <view style="display:flex;gap:10rpx">
+        <view class="tab {{mode === 'day' ? 'on' : ''}}" data-mode="day" bindtap="switchMode" style="padding:8rpx 20rpx;font-size:22rpx">按日</view>
+        <view class="tab {{mode === 'month' ? 'on' : ''}}" data-mode="month" bindtap="switchMode" style="padding:8rpx 20rpx;font-size:22rpx">按月</view>
+        <view class="tab {{mode === 'year' ? 'on' : ''}}" data-mode="year" bindtap="switchMode" style="padding:8rpx 20rpx;font-size:22rpx">按年</view>
+      </view>
+    </view>
+
+    <view wx:if="{{!groups.length}}" class="empty">
+      <view class="ico">📒</view>
+      <view class="t">还没记过账</view>
+      <view class="d">用下面的「加钱 / 减钱」记第一笔</view>
+    </view>
+
+    <block wx:for="{{groups}}" wx:key="key">
+      <view class="group-head">
+        <text>{{item.label}}</text>
+        <text class="g-sum {{item.subtotalTone}}">{{item.subtotalText}}</text>
+        <text class="g-end">{{item.endingText}}</text>
+      </view>
+      <view class="tx-list">
+        <view
+          class="tx {{titem.voided ? 'is-void' : ''}}"
+          wx:for="{{item.items}}"
+          wx:for-item="titem"
+          wx:key="id"
+          data-id="{{titem.id}}"
+          data-voided="{{titem.voided}}"
+          bindtap="tapTxn"
+        >
+          <view class="tx-sign {{titem.tone === 'plus' ? 'is-plus' : 'is-minus'}}">{{titem.signText}}</view>
+          <view class="tx-main">
+            <view class="tx-title">{{titem.title}}</view>
+            <view class="tx-meta">{{titem.meta}}</view>
+          </view>
+          <view class="tx-bal">{{titem.runningText}}</view>
+        </view>
+      </view>
+    </block>
+
+    <view class="sheet-pad"></view>
+  </block>
+</view>
+
+<!-- 底部加减 -->
+<view class="action-bar" wx:if="{{!loading && !error}}">
+  <view class="big-btn btn-in" data-kind="in" bindtap="openSheet"><text class="ico">+</text>加钱</view>
+  <view class="big-btn btn-out" data-kind="out" bindtap="openSheet"><text class="ico">−</text>减钱</view>
+</view>
+
+<!-- 记账弹层 -->
+<view class="mask" wx:if="{{sheetShow}}" bindtap="closeSheet"></view>
+<view class="sheet" wx:if="{{sheetShow}}">
+  <view class="sheet-head">
+    <text class="sheet-title">{{sheetTitle}}</text>
+    <text class="sheet-close" bindtap="closeSheet">✕</text>
+  </view>
+
+  <view class="field">
+    <view class="field-label">{{sheetKind === 'in' ? '加多少钱' : '减多少钱'}}</view>
+    <view class="amount-input">
+      <text class="prefix">¥</text>
+      <input type="digit" value="{{amount}}" bindinput="onAmount" placeholder="0" focus="{{sheetShow}}" />
+    </view>
+    <view class="quick">
+      <view class="chip" wx:for="{{[10,20,30,50,100,200]}}" wx:key="*this" data-v="{{item}}" bindtap="quick">{{item}}</view>
+    </view>
+  </view>
+
+  <view class="field">
+    <view class="field-label">备注（可不填）</view>
+    <input class="text-input" value="{{noteInput}}" bindinput="onNote" placeholder="例如：抽谷 / 吧唧卖出" maxlength="60" />
+  </view>
+
+  <view class="sheet-actions">
+    <view class="btn btn-ghost" bindtap="closeSheet">取消</view>
+    <view class="btn {{sheetKind === 'in' ? 'btn-plus' : 'btn-minus'}}" bindtap="save">{{saving ? '保存中…' : (sheetKind === 'in' ? '确认加钱' : '确认减钱')}}</view>
+  </view>
+</view>

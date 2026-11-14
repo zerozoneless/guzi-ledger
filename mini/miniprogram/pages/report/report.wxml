@@ -1,0 +1,96 @@
+<view class="page-pad">
+
+  <view class="tabs">
+    <view class="tab {{range === 'today' ? 'on' : ''}}" data-range="today" bindtap="switchRange">今日</view>
+    <view class="tab {{range === 'month' ? 'on' : ''}}" data-range="month" bindtap="switchRange">本月</view>
+    <view class="tab {{range === 'year' ? 'on' : ''}}" data-range="year" bindtap="switchRange">今年</view>
+    <view class="tab {{range === 'all' ? 'on' : ''}}" data-range="all" bindtap="switchRange">全部</view>
+  </view>
+
+  <view class="loading" wx:if="{{loading}}">加载中…</view>
+
+  <view class="empty" wx:elif="{{error}}">
+    <view class="ico">⚠️</view>
+    <view class="t">{{error}}</view>
+  </view>
+
+  <block wx:else>
+    <view class="kpi-grid">
+      <view class="kpi">
+        <view class="kpi-label">未兑付余额</view>
+        <view class="kpi-value">{{totalText}}</view>
+        <view class="kpi-sub">全部客户合计</view>
+      </view>
+      <view class="kpi">
+        <view class="kpi-label">期间净变动</view>
+        <view class="kpi-value {{netTone}}">{{netText}}</view>
+        <view class="kpi-sub">{{rangeLabel}} · {{countText}}</view>
+      </view>
+      <view class="kpi">
+        <view class="kpi-label">加钱</view>
+        <view class="kpi-value is-plus">{{inflowText}}</view>
+        <view class="kpi-sub">顾客存进来的</view>
+      </view>
+      <view class="kpi">
+        <view class="kpi-label">减钱</view>
+        <view class="kpi-value is-minus">{{outflowText}}</view>
+        <view class="kpi-sub">扣掉的</view>
+      </view>
+    </view>
+
+    <view class="section-head" style="margin-top:36rpx">
+      <text>每日对账</text>
+      <text class="sub">期末 = 期初 + 当日净变动</text>
+    </view>
+
+    <view class="card">
+      <view class="row" style="background:#FBF9F4;font-size:22rpx;color:#8C8579">
+        <text style="width:180rpx">日期</text>
+        <text style="flex:1;text-align:right">加钱</text>
+        <text style="flex:1;text-align:right">减钱</text>
+        <text style="flex:1;text-align:right">净变动</text>
+        <text style="width:150rpx;text-align:right">期末余额</text>
+      </view>
+
+      <view class="row" wx:if="{{showOpening}}">
+        <text class="muted" style="width:180rpx">期初</text>
+        <text style="flex:1;text-align:right" class="muted">—</text>
+        <text style="flex:1;text-align:right" class="muted">—</text>
+        <text style="flex:1;text-align:right" class="muted">—</text>
+        <text style="width:150rpx;text-align:right" class="muted">{{openingText}}</text>
+      </view>
+
+      <view class="row" wx:for="{{rows}}" wx:key="key">
+        <text style="width:180rpx">{{item.label}}</text>
+        <text style="flex:1;text-align:right" class="{{item.inflowTone}}">{{item.inflow}}</text>
+        <text style="flex:1;text-align:right" class="{{item.outflowTone}}">{{item.outflow}}</text>
+        <text style="flex:1;text-align:right" class="{{item.netTone}}">{{item.net}}</text>
+        <text style="width:150rpx;text-align:right;font-weight:700">{{item.ending}}</text>
+      </view>
+
+      <view wx:if="{{!rows.length}}" class="empty" style="padding:50rpx">
+        <view class="d">这段时间没有流水</view>
+      </view>
+
+      <view class="report-foot">
+        <text>{{rangeLabel}}合计</text>
+        <text>加钱 {{inflowText}} · 减钱 {{outflowText}}</text>
+      </view>
+    </view>
+
+    <view class="section-head" style="margin-top:20rpx">
+      <text>客户余额</text>
+      <text class="sub">合计 {{balancesTotalText}}</text>
+    </view>
+
+    <view class="card">
+      <view class="row" wx:for="{{balances}}" wx:key="id" data-id="{{item.id}}" bindtap="openCustomer">
+        <text>{{item.name}}</text>
+        <text class="{{item.tone}}" style="font-weight:700">{{item.text}}</text>
+      </view>
+      <view wx:if="{{!balances.length}}" class="empty" style="padding:50rpx">
+        <view class="d">还没有客户</view>
+      </view>
+    </view>
+  </block>
+</view>

@@ -33,6 +33,95 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
   };
 
+  /* ================================================================ 云同步 */
+
+  var syncState = { status: 'off', lastAt: 0, error: '', busy: false, timer: null };
+
+  function syncStatusText() {
+    if (!DB.syncEnabled()) return '未开启，数据只在这台设备上';
+    if (syncState.status === 'syncing') return '同步中…';
+    if (syncState.status === 'error') return '同步失败：' + syncState.error;
+    if (!syncState.lastAt) return '已开启，等待首次同步';
+    var diff = Math.round((Date.now() - syncState.lastAt) / 1000);
+    var when = diff < 60 ? '刚刚' : diff < 3600 ? Math.floor(diff / 60) + ' 分钟前' : Math.floor(diff / 3600) + ' 小时前';
+    return '已开启 · ' + when + '同步过';
+  }
+
+  function scheduleSync() {
+    if (!DB.syncEnabled()) return;
+    clearTimeout(syncState.timer);
+    syncState.timer = setTimeout(function () { doSync({ silent: true }); }, 1500);
+  }
+
+  function doSync(opts) {
+    var o = opts || {};
+    if (!DB.syncEnabled() || syncState.busy) return Promise.resolve(null);
+    syncState.busy = true;
+    syncState.status = 'syncing';
+    if (!o.silent) render({ keepScroll: true });
+
+    return window.HXCloud.syncNow(DB, DB.syncConfig())
+      .then(function (r) {
+        syncState.status = 'idle';
+        syncState.lastAt = Date.now();
+        syncState.error = '';
+        syncState.busy = false;
+        if (!o.silent) toast('已同步：上传 ' + r.pushed + ' 条');
+        if (!openDialogEl) render({ keepScroll: true });
+        return r;
+      })
+      .catch(function (e) {
+        syncState.status = 'error';
+        syncState.error = e.message || '网络异常';
+        syncState.busy = false;
+        if (!o.silent) toast('同步失败：' + syncState.error, true);
+        if (!openDialogEl) render({ keepScroll: true });
+        return null;
+      });
+  }
+
+  function openSyncSheet() {
+    var cfg = DB.syncConfig();
+    openSheet({
+      title: '云同步设置',
+      submitLabel: '保存并同步',
+      cancelText: '取消',
+      body:
+        '<div class="notice" style="margin-bottom:14px"><span>☁️</span><span>需要一个 Supabase 免费项目（不用绑卡）。建表用的 SQL 在 README 里，复制粘贴执行一次即可。</span></div>' +
+        field('项目地址', textInput('url', cfg.url, 'https://abcdefgh.supabase.co'), { required: true }) +
+        field(
+          'anon public key',
+          '<textarea name="key" placeholder="eyJhbGciOiJIUzI1NiIs...">' + esc(cfg.key) + '</textarea>',
+          { required: true, hint: 'Supabase 设置里的 anon key' }
+        ) +
+        field('房间码', textInput('room', cfg.room, '自己定一个，例如 guzi-2026'), {
+          required: true,
+          hint: '多人填一样的才是同一本账'
+        }),
+      onSubmit: function (form) {
+        var fd = new FormData(form);
+        var next = {
+          url: String(fd.get('url') || '').trim(),
+          key: String(fd.get('key') || '').trim(),
+          room: String(fd.get('room') || '').trim()
+        };
+        if (!next.url || !next.key || !next.room) return '三项都要填';
+        if (!/^https?:\/\//.test(next.url)) return '项目地址要以 https:// 开头';
+        DB.setSyncConfig(next);
+        HXCloud.testConnection(DB.syncConfig())
+          .then(function () {
+            toast('连接成功');
+            return doSync({});
+          })
+          .catch(function (e) {
+            toast('连接失败：' + e.message, true);
+            render({ keepScroll: true });
+          });
+        return null;
+      }
+    });
+  }
+
   /* ================================================================ 工具 */
 
   var esc = C.esc;
@@ -526,6 +615,23 @@
       '<button type="button" class="btn btn--sm btn--ghost" data-act="import-json">导入</button></div>' +
       '<div class="set-row"><div><div class="set-label">导出流水表</div><div class="set-hint">CSV 格式，可用 Excel / WPS 打开</div></div>' +
       '<button type="button" class="btn btn--sm btn--ghost" data-act="export-csv">导出</button></div>' +
+      '</section>';
+
+    html +=
+      '<div class="section-head" style="margin-top:20px"><span>云同步</span><span class="sub">多人共用一本账</span></div>' +
+      '<section class="card">' +
+      '<div class="set-row"><div><div class="set-label">' + (DB.syncEnabled() ? '已开启' : '未开启') + '</div>' +
+      '<div class="set-hint">' + esc(syncStatusText()) + '</div></div>' +
+      (DB.syncEnabled() ? '<button type="button" class="btn btn--sm btn--ghost" data-act="sync-now">立即同步</button>' : '') +
+      '</div>' +
+      '<div class="set-row"><div><div class="set-label">' + (DB.syncEnabled() ? '修改配置' : '开启云同步') + '</div>' +
+      '<div class="set-hint">数据存到云端，换手机、多人记账都不丢</div></div>' +
+      '<button type="button" class="btn btn--sm ' + (DB.syncEnabled() ? 'btn--ghost' : 'btn--primary') + '" data-act="sync-config">' +
+      (DB.syncEnabled() ? '修改' : '设置') + '</button></div>' +
+      (DB.syncEnabled()
+        ? '<div class="set-row"><div><div class="set-label">关闭同步</div><div class="set-hint">只影响这台设备，不会删除云端数据</div></div>' +
+          '<button type="button" class="btn btn--sm btn--danger" data-act="sync-off">关闭</button></div>'
+        : '') +
       '</section>';
 
     html +=
@@ -1093,6 +1199,27 @@
         pickImportFile();
         break;
 
+      case 'sync-config':
+        openSyncSheet();
+        break;
+
+      case 'sync-now':
+        doSync({});
+        break;
+
+      case 'sync-off':
+        askConfirm({
+          title: '关闭云同步？',
+          message: '这台设备将恢复为只存本机。云端数据不会被删除，之后重新填配置就能连回来。',
+          confirmText: '关闭'
+        }).then(function (yes) {
+          if (!yes) return;
+          DB.setSyncConfig({ url: '', key: '', room: '' });
+          toast('已关闭同步');
+          render({ keepScroll: true });
+        });
+        break;
+
       case 'clear-all':
         askConfirm({
           title: '清空全部数据？',
@@ -1177,9 +1304,24 @@
 
   DB.init();
 
+  // 任何写操作都自动挂上「稍后同步」
+  ['addCustomer', 'updateCustomer', 'deleteCustomer', 'addTxn', 'updateTxn', 'setVoid', 'deleteTxn', 'clearAll', 'seedDemo', 'importJSON'].forEach(function (name) {
+    var orig = DB[name];
+    DB[name] = function () {
+      var res = orig.apply(DB, arguments);
+      if (!res || res.ok !== false) scheduleSync();
+      return res;
+    };
+  });
+
   if (!DB.customers().length && /[?&]demo=1\b/.test(location.search)) {
     DB.seedDemo();
   }
 
   render();
+
+  // 已配置云同步的话，启动时先拉一次最新的
+  if (DB.syncEnabled()) {
+    setTimeout(function () { doSync({ silent: true }); }, 100);
+  }
 })();

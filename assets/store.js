@@ -1,23 +1,32 @@
 /*!
- * 谷子账本 · 数据层（简洁版）
- * 负责：localStorage 持久化、客户与流水的增删改查、导入导出、示例数据。
- * 金额以「分」存储，时间以本地 "YYYY-MM-DDTHH:mm" 存储。
+ * 谷子账本 · 数据层（简洁版 + 云同步支持）
+ * - 每条记录带 updatedAt（毫秒），用于多设备合并
+ * - 删除采用「墓碑」：deleted=true 保留记录，同步后其他设备才知道要删
+ * - 金额以「分」存储，时间以本地 "YYYY-MM-DDTHH:mm" 存储
  */
 (function (root) {
   'use strict';
 
   var C = root.HXCore;
   var STORAGE_KEY = 'hxsavings.v1';
-  var SCHEMA_VERSION = 2;
+  var SCHEMA_VERSION = 3;
 
   var memoryFallback = null;
   var state = null;
+
+  // 一次性取到 storage 引用（之后不再依赖 window，便于测试与多实例）
+  var storage = null;
+  try {
+    storage = typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
+  } catch (e) {
+    storage = null;
+  }
 
   /* ---------------------------------------------------------------- 持久化 */
 
   function readRaw() {
     try {
-      return window.localStorage.getItem(STORAGE_KEY);
+      return storage ? storage.getItem(STORAGE_KEY) : (memoryFallback ? JSON.stringify(memoryFallback) : null);
     } catch (err) {
       return memoryFallback ? JSON.stringify(memoryFallback) : null;
     }
@@ -25,10 +34,11 @@
 
   function writeRaw(text) {
     try {
-      window.localStorage.setItem(STORAGE_KEY, text);
+      if (storage) storage.setItem(STORAGE_KEY, text);
+      else memoryFallback = JSON.parse(text);
     } catch (err) {
       memoryFallback = JSON.parse(text);
-      console.warn('[谷子账本] localStorage 不可用，数据仅保存在当前页面内存中。', err);
+      console.warn('[谷子账本] 本地存储不可用，数据仅保存在当前页面内存中。', err);
     }
   }
 
@@ -37,20 +47,30 @@
       version: SCHEMA_VERSION,
       roomName: '谷子直播间',
       defaults: { operator: '' },
+      sync: { url: '', key: '', room: '' },
       customers: [],
       txns: []
     };
   }
 
-  // 老版本（有存入/消费/寄售售出/调整四种类型）迁移成加钱/减钱
+  // 老版本类型迁移：存入/寄售售出→加钱，消费→减钱
   var LEGACY_KIND = { deposit: 'in', sale: 'in', purchase: 'out', adjust: null, in: 'in', out: 'out' };
+
+  function ms(value, fallback) {
+    var n = Number(value);
+    if (isFinite(n) && n > 0) return Math.round(n);
+    return fallback || 0;
+  }
 
   function normalize(raw) {
     var s = Object.assign(blankState(), raw || {});
     s.version = SCHEMA_VERSION;
     s.defaults = Object.assign({ operator: '' }, s.defaults || {});
+    s.sync = Object.assign({ url: '', key: '', room: '' }, s.sync || {});
     s.customers = Array.isArray(s.customers) ? s.customers : [];
     s.txns = Array.isArray(s.txns) ? s.txns : [];
+
+    var now = Date.now();
 
     s.customers = s.customers
       .filter(function (c) { return c && c.id && c.name; })
@@ -60,7 +80,9 @@
           name: String(c.name),
           phone: c.phone ? String(c.phone) : '',
           note: c.note ? String(c.note) : '',
-          createdAt: C.normStamp(c.createdAt) || C.nowStamp()
+          createdAt: C.normStamp(c.createdAt) || C.nowStamp(),
+          updatedAt: ms(c.updatedAt, now),
+          deleted: !!c.deleted
         };
       });
 
@@ -85,13 +107,12 @@
           note: t.note ? String(t.note) : (t.itemName ? String(t.itemName) : ''),
           operator: t.operator ? String(t.operator) : '',
           voided: !!t.voided,
-          voidedAt: t.voided ? C.normStamp(t.voidedAt) || '' : ''
+          voidedAt: t.voided ? C.normStamp(t.voidedAt) || '' : '',
+          updatedAt: ms(t.updatedAt, now),
+          deleted: !!t.deleted
         };
       })
-      .sort(function (a, b) {
-        if (a.at === b.at) return a.createdAt < b.createdAt ? -1 : 1;
-        return a.at < b.at ? -1 : 1;
-      });
+      .sort(function (a, b) { return a.at < b.at ? -1 : 1; });
 
     return s;
   }
@@ -123,6 +144,15 @@
     writeRaw(JSON.stringify(state));
   }
 
+  /** 单调递增的版本戳，避免同一毫秒多次修改 */
+  var lastStamp = 0;
+  function nextStamp() {
+    var t = Date.now();
+    if (t <= lastStamp) t = lastStamp + 1;
+    lastStamp = t;
+    return t;
+  }
+
   /* ---------------------------------------------------------------- 设置 */
 
   function setSetting(key, value) {
@@ -133,28 +163,54 @@
     return s;
   }
 
+  function syncConfig() {
+    return Object.assign({}, getState().sync);
+  }
+
+  function setSyncConfig(cfg) {
+    var s = getState();
+    s.sync = {
+      url: String((cfg && cfg.url) || '').trim().replace(/\/+$/, ''),
+      key: String((cfg && cfg.key) || '').trim(),
+      room: String((cfg && cfg.room) || '').trim()
+    };
+    save();
+    return s.sync;
+  }
+
+  function syncEnabled() {
+    var c = getState().sync;
+    return !!(c.url && c.key && c.room);
+  }
+
   /* ---------------------------------------------------------------- 客户 */
 
-  function customers() {
+  function allCustomers() {
     return getState().customers.slice();
   }
 
+  function customers() {
+    return getState().customers.filter(function (c) { return !c.deleted; });
+  }
+
   function customer(id) {
-    return getState().customers.find(function (c) { return c.id === id; }) || null;
+    return getState().customers.find(function (c) { return c.id === id && !c.deleted; }) || null;
   }
 
   function addCustomer(payload) {
     var name = String((payload && payload.name) || '').trim();
     if (!name) return { ok: false, error: '请填写客户名称' };
     var s = getState();
-    var dup = s.customers.find(function (c) { return c.name === name; });
+    var dup = s.customers.find(function (c) { return !c.deleted && c.name === name; });
     if (dup) return { ok: false, error: '已有同名客户「' + name + '」，可以加个后缀区分' };
     var c = {
       id: C.uid('c'),
       name: name,
-      phone: String((payload && payload.phone) || '').trim(),
+      phone: '',
       note: String((payload && payload.note) || '').trim(),
-      createdAt: C.nowStamp()
+      createdAt: C.nowStamp(),
+      updatedAt: nextStamp(),
+      deleted: false
     };
     s.customers.push(c);
     save();
@@ -168,43 +224,55 @@
       var name = String(patch.name).trim();
       if (!name) return { ok: false, error: '名称不能为空' };
       var s = getState();
-      var dup = s.customers.find(function (x) { return x.name === name && x.id !== id; });
+      var dup = s.customers.find(function (x) { return x.name === name && x.id !== id && !x.deleted; });
       if (dup) return { ok: false, error: '已有同名客户' };
       c.name = name;
     }
-    if (patch.phone !== undefined) c.phone = String(patch.phone).trim();
     if (patch.note !== undefined) c.note = String(patch.note).trim();
+    c.updatedAt = nextStamp();
     save();
     return { ok: true, customer: c };
   }
 
   function deleteCustomer(id) {
     var s = getState();
-    var before = s.txns.length;
-    s.customers = s.customers.filter(function (c) { return c.id !== id; });
-    s.txns = s.txns.filter(function (t) { return t.customerId !== id; });
+    var stamp = nextStamp();
+    var removed = 0;
+    s.customers.forEach(function (c) {
+      if (c.id === id) {
+        c.deleted = true;
+        c.updatedAt = stamp;
+      }
+    });
+    s.txns.forEach(function (t) {
+      if (t.customerId === id && !t.deleted) {
+        t.deleted = true;
+        t.updatedAt = stamp;
+        removed += 1;
+      }
+    });
     save();
-    return { ok: true, removed: before - s.txns.length };
+    return { ok: true, removed: removed };
   }
 
   /* ---------------------------------------------------------------- 流水 */
 
-  function txns() {
+  function allTxns() {
     return getState().txns.slice();
   }
 
+  function txns() {
+    return getState().txns.filter(function (t) { return !t.deleted; });
+  }
+
   function txnsOf(customerId) {
-    return getState().txns.filter(function (t) { return t.customerId === customerId; });
+    return getState().txns.filter(function (t) { return t.customerId === customerId && !t.deleted; });
   }
 
   function txn(id) {
-    return getState().txns.find(function (t) { return t.id === id; }) || null;
+    return getState().txns.find(function (t) { return t.id === id && !t.deleted; }) || null;
   }
 
-  /**
-   * 新增流水
-   * payload: { customerId, kind: 'in'|'out', amount: 正数分, at, note, operator }
-   */
   function addTxn(payload) {
     var p = payload || {};
     if (!customer(p.customerId)) return { ok: false, error: '请选择客户' };
@@ -223,7 +291,9 @@
       note: String(p.note || '').trim(),
       operator: String(p.operator || getState().defaults.operator || '').trim(),
       voided: false,
-      voidedAt: ''
+      voidedAt: '',
+      updatedAt: nextStamp(),
+      deleted: false
     };
 
     var s = getState();
@@ -238,7 +308,6 @@
     if (!t) return { ok: false, error: '记录不存在' };
     var p = patch || {};
 
-    if (p.kind !== undefined && C.KINDS[p.kind]) t.kind = p.kind;
     if (p.amount !== undefined) {
       var magnitude = Math.round(Math.abs(Number(p.amount) || 0));
       if (!magnitude) return { ok: false, error: '请填写金额' };
@@ -252,6 +321,7 @@
     if (p.note !== undefined) t.note = String(p.note).trim();
     if (p.operator !== undefined) t.operator = String(p.operator).trim();
 
+    t.updatedAt = nextStamp();
     save();
     return { ok: true, txn: t };
   }
@@ -261,23 +331,26 @@
     if (!t) return { ok: false, error: '记录不存在' };
     t.voided = !!voided;
     t.voidedAt = voided ? C.nowStamp() : '';
+    t.updatedAt = nextStamp();
     save();
     return { ok: true, txn: t };
   }
 
   function deleteTxn(id) {
-    var s = getState();
-    var before = s.txns.length;
-    s.txns = s.txns.filter(function (t) { return t.id !== id; });
+    var t = getState().txns.find(function (x) { return x.id === id; });
+    if (!t) return { ok: false };
+    t.deleted = true;
+    t.updatedAt = nextStamp();
     save();
-    return { ok: before !== s.txns.length };
+    return { ok: true };
   }
 
   /* ---------------------------------------------------------------- 统计 */
 
   function stats() {
     var s = getState();
-    var balances = C.balanceMap(s.customers, s.txns);
+    var live = C.liveTxns(txns());
+    var balances = C.balanceMap(customers(), txns());
     var total = 0;
     Object.keys(balances).forEach(function (id) { total += balances[id]; });
     var bytes = 0;
@@ -287,12 +360,97 @@
       bytes = JSON.stringify(s).length;
     }
     return {
-      customers: s.customers.length,
-      txns: s.txns.length,
-      liveTxns: C.liveTxns(s.txns).length,
-      voided: s.txns.length - C.liveTxns(s.txns).length,
+      customers: customers().length,
+      txns: txns().length,
+      voided: txns().length - live.length,
       totalBalance: total,
-      bytes: bytes
+      bytes: bytes,
+      pendingDeletes: s.customers.filter(function (c) { return c.deleted; }).length +
+        s.txns.filter(function (t) { return t.deleted; }).length
+    };
+  }
+
+  /* ---------------------------------------------------------------- 云同步合并 */
+
+  /**
+   * 把远端记录合并进本地。
+   * remoteRows: [{...local形状, updatedAt, deleted}]
+   * 返回需要回推到远端的本地记录
+   */
+  function mergeRemote(kind, remoteRows) {
+    var s = getState();
+    var list = kind === 'customers' ? s.customers : s.txns;
+    var byId = {};
+    list.forEach(function (r) { byId[r.id] = r; });
+
+    var toPush = [];
+    var changed = false;
+    var seen = {};
+
+    (remoteRows || []).forEach(function (row) {
+      if (!row || !row.id) return;
+      seen[row.id] = true;
+      var local = byId[row.id];
+      var remoteStamp = ms(row.updatedAt, 0);
+
+      if (!local) {
+        // 远端新增
+        list.push(row);
+        byId[row.id] = row;
+        changed = true;
+        return;
+      }
+      if (remoteStamp > local.updatedAt) {
+        // 远端更新，覆盖本地
+        Object.keys(row).forEach(function (k) { local[k] = row[k]; });
+        changed = true;
+      } else if (local.updatedAt > remoteStamp) {
+        toPush.push(local);
+      }
+    });
+
+    // 本地有、远端没有 → 需要推送
+    list.forEach(function (local) {
+      if (!seen[local.id]) toPush.push(local);
+    });
+
+    if (changed) {
+      s.txns.sort(function (a, b) { return a.at < b.at ? -1 : 1; });
+      save();
+    }
+    return toPush;
+  }
+
+  /** 云端全部记录（含墓碑），供同步使用 */
+  function exportForSync() {
+    var s = getState();
+    return {
+      customers: s.customers.map(function (c) {
+        return {
+          id: c.id,
+          name: c.name,
+          note: c.note,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          deleted: !!c.deleted
+        };
+      }),
+      txns: s.txns.map(function (t) {
+        return {
+          id: t.id,
+          customerId: t.customerId,
+          kind: t.kind,
+          amount: t.amount,
+          at: t.at,
+          note: t.note,
+          operator: t.operator,
+          voided: !!t.voided,
+          voidedAt: t.voidedAt,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          deleted: !!t.deleted
+        };
+      })
     };
   }
 
@@ -306,8 +464,8 @@
       exportedAt: C.nowStamp(),
       roomName: s.roomName,
       defaults: s.defaults,
-      customers: s.customers,
-      txns: s.txns
+      customers: s.customers.filter(function (c) { return !c.deleted; }),
+      txns: s.txns.filter(function (t) { return !t.deleted; })
     };
   }
 
@@ -315,9 +473,6 @@
     return JSON.stringify(exportData(), null, 2);
   }
 
-  /**
-   * mode: 'replace' | 'merge'
-   */
   function importJSON(text, mode) {
     var parsed;
     try {
@@ -330,6 +485,9 @@
     }
 
     var incoming = normalize(parsed);
+    var stamp = nextStamp();
+    incoming.customers.forEach(function (c) { c.updatedAt = stamp; });
+    incoming.txns.forEach(function (t) { t.updatedAt = stamp; });
 
     if (mode === 'merge') {
       var s = getState();
@@ -337,7 +495,7 @@
       s.customers.forEach(function (c) { ids[c.id] = true; });
       incoming.customers.forEach(function (c) {
         if (ids[c.id]) return;
-        if (s.customers.some(function (x) { return x.name === c.name; })) c.name = c.name + '（导入）';
+        if (s.customers.some(function (x) { return !x.deleted && x.name === c.name; })) c.name = c.name + '（导入）';
         s.customers.push(c);
       });
       var txnIds = {};
@@ -353,13 +511,18 @@
       return { ok: true, mode: 'merge', customers: s.customers.length, txns: s.txns.length };
     }
 
+    var sync = getState().sync;
     state = incoming;
+    state.sync = sync;
     save();
     return { ok: true, mode: 'replace', customers: state.customers.length, txns: state.txns.length };
   }
 
   function clearAll() {
-    state = blankState();
+    var s = getState();
+    var stamp = nextStamp();
+    s.customers.forEach(function (c) { c.deleted = true; c.updatedAt = stamp; });
+    s.txns.forEach(function (t) { t.deleted = true; t.updatedAt = stamp; });
     save();
     return { ok: true };
   }
@@ -368,18 +531,27 @@
 
   function seedDemo() {
     var s = blankState();
+    s.sync = (state && state.sync) || { url: '', key: '', room: '' };
     s.roomName = '谷子直播间（示例）';
     s.defaults.operator = '小影';
 
     function day(offset) {
       return C.addDays(C.dayKey(C.nowStamp()), offset);
     }
-    function mk(name, phone, note) {
-      var c = { id: C.uid('c'), name: name, phone: phone || '', note: note || '', createdAt: C.nowStamp() };
+    function mk(name, note) {
+      var c = {
+        id: C.uid('c'),
+        name: name,
+        phone: '',
+        note: note || '',
+        createdAt: C.nowStamp(),
+        updatedAt: nextStamp(),
+        deleted: false
+      };
       s.customers.push(c);
       return c;
     }
-    function push(cust, at, amount, note, operator) {
+    function push(cust, at, amount, note) {
       s.txns.push({
         id: C.uid('t'),
         customerId: cust.id,
@@ -388,17 +560,19 @@
         kind: amount > 0 ? 'in' : 'out',
         amount: amount,
         note: note || '',
-        operator: operator || '小影',
+        operator: '小影',
         voided: false,
-        voidedAt: ''
+        voidedAt: '',
+        updatedAt: nextStamp(),
+        deleted: false
       });
     }
 
-    var xingye = mk('星野', '13800000001', '老客');
-    var juzi = mk('橘子汽水', '13800000002', '');
-    var achai = mk('阿柴', '', '朋友介绍');
-    var baitao = mk('白桃乌龙', '13800000003', '');
-    var xiaoman = mk('小满', '', '');
+    var xingye = mk('星野', '老客');
+    var juzi = mk('橘子汽水');
+    var achai = mk('阿柴', '朋友介绍');
+    var baitao = mk('白桃乌龙');
+    var xiaoman = mk('小满');
 
     push(xingye, day(-33) + 'T20:12', 3000, '微信转账');
     push(xingye, day(-32) + 'T21:05', -1500, '抽谷 · 银狼吧唧');
@@ -414,20 +588,11 @@
 
     push(achai, day(-20) + 'T18:20', 15000, '现金');
     push(achai, day(-18) + 'T20:00', -3500, '毛绒挂件');
-    push(achai, day(-17) + 'T20:00', -9900, '录错了');
-    var last = s.txns[s.txns.length - 1];
-    last.voided = true;
-    last.voidedAt = day(-17) + 'T20:05';
-
     push(baitao, day(-40) + 'T19:00', 8000, '');
     push(baitao, day(-38) + 'T21:00', -3000, '吧唧 五条');
-    push(baitao, day(-30) + 'T21:20', -2600, '立牌');
     push(baitao, day(-20) + 'T22:00', 1500, '吧唧卖出');
-    push(baitao, day(-3) + 'T22:10', 1800, '立牌卖出');
-
     push(xiaoman, day(-8) + 'T20:30', 3000, '');
     push(xiaoman, day(-7) + 'T21:00', -2800, '拍立得 4 张');
-    push(xiaoman, day(-2) + 'T20:15', 500, '活动补差');
 
     s.txns.sort(function (a, b) { return a.at < b.at ? -1 : 1; });
     state = s;
@@ -441,12 +606,17 @@
     state: getState,
     save: save,
     setSetting: setSetting,
+    syncConfig: syncConfig,
+    setSyncConfig: setSyncConfig,
+    syncEnabled: syncEnabled,
     customers: customers,
+    allCustomers: allCustomers,
     customer: customer,
     addCustomer: addCustomer,
     updateCustomer: updateCustomer,
     deleteCustomer: deleteCustomer,
     txns: txns,
+    allTxns: allTxns,
     txnsOf: txnsOf,
     txn: txn,
     addTxn: addTxn,
@@ -454,6 +624,8 @@
     setVoid: setVoid,
     deleteTxn: deleteTxn,
     stats: stats,
+    mergeRemote: mergeRemote,
+    exportForSync: exportForSync,
     exportData: exportData,
     exportJSON: exportJSON,
     importJSON: importJSON,

@@ -1,6 +1,7 @@
 /*!
- * 谷子账本 · 界面层
- * 单页应用，hash 路由：#/ 首页 · #/c/<id> 客户详情 · #/report 报表 · #/settings 设置
+ * 谷子账本 · 界面层（简洁版）
+ * 只做一件事：记某个人的钱加了多少、减了多少。
+ * hash 路由：#/ 首页 · #/c/<id> 客户详情 · #/report 报表 · #/settings 设置
  */
 (function () {
   'use strict';
@@ -29,7 +30,7 @@
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
     more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>',
     download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>',
-    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V8"/><path d="M7 12l5-5 5 5"/><path d="M4 4h16"/></svg>'
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
   };
 
   /* ================================================================ 工具 */
@@ -91,7 +92,6 @@
     appEl.innerHTML = html;
     lastRouteKey = routeKey;
 
-    // 算式溢出时加渐隐遮罩，提示还能横向滑动
     Array.prototype.forEach.call(appEl.querySelectorAll('.eq-scroll'), function (box) {
       if (box.scrollWidth > box.clientWidth + 2) box.classList.add('is-overflow');
     });
@@ -130,6 +130,16 @@
     );
   }
 
+  function segButtons(act, current, options) {
+    return (
+      '<span class="seg">' +
+      options.map(function (o) {
+        return '<button data-act="' + act + '" data-value="' + o[0] + '" class="' + (current === o[0] ? 'is-on' : '') + '">' + o[1] + '</button>';
+      }).join('') +
+      '</span>'
+    );
+  }
+
   /* ================================================================ 首页 */
 
   function viewHome() {
@@ -145,14 +155,7 @@
     var monthSum = C.summaryOf(txns, C.rangeOf('month'));
     var todaySum = C.summaryOf(txns, C.rangeOf('today'));
 
-    var filtered = C.searchCustomers(customers, ui.search);
-    filtered.sort(function (a, b) {
-      if (ui.sort === 'balance') return (balances[b.id] || 0) - (balances[a.id] || 0);
-      if (ui.sort === 'name') return a.name.localeCompare(b.name, 'zh-CN');
-      return String(lastActive[b.id] || '').localeCompare(String(lastActive[a.id] || ''));
-    });
-
-    var staleBackup = shouldWarnBackup();
+    var filtered = sortCustomers(C.searchCustomers(customers, ui.search), balances, lastActive);
 
     var html = '<div class="shell">';
 
@@ -161,14 +164,14 @@
       '<div class="brand"><span class="brand-mark">谷</span>谷子账本</div>' +
       '<div class="brand-sub">' + esc(st.roomName) + '</div>' +
       '<div class="topbar-spacer"></div>' +
-      '<button class="icon-btn" data-act="new-customer" title="添加客户">' +
+      '<button class="icon-btn" data-act="new-customer" title="添加客户" aria-label="添加客户">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>' +
       '</button>' +
       '</header>';
 
     html +=
       '<section class="hero">' +
-      '<div class="hero-label">未兑付余额合计</div>' +
+      '<div class="hero-label">合计未兑付余额</div>' +
       '<div class="hero-value num"><span class="unit">' + (total < 0 ? '−¥' : '¥') + '</span>' + C.formatCents(Math.abs(total)) + '</div>' +
       '<div class="hero-meta">' +
       '<span><b>' + customers.length + '</b> 位客户</span>' +
@@ -177,10 +180,9 @@
       '</div>' +
       '</section>';
 
-    if (staleBackup) {
+    if (shouldWarnBackup()) {
       html +=
-        '<div class="search-wrap" style="margin-top:12px">' +
-        '<div class="notice">' +
+        '<div class="search-wrap" style="margin-top:12px"><div class="notice">' +
         '<span>💾</span><span><strong>建议做一次备份。</strong>数据只存在当前浏览器里，清除缓存或换设备会丢失。到「设置」导出备份文件即可。</span>' +
         '</div></div>';
     }
@@ -190,7 +192,7 @@
         '<div class="empty">' +
         '<div class="empty-icon">🗂️</div>' +
         '<h3>还没有客户</h3>' +
-        '<p>先添加第一位客户，之后每笔存入、消费、寄售售出都记在这个人名下，余额会自动累计。</p>' +
+        '<p>先加一位客户，之后每笔加钱、减钱都记在这个人名下，余额自动累计。</p>' +
         '<button class="btn btn--primary" data-act="new-customer">添加第一位客户</button>' +
         '<div style="margin-top:10px"><button class="btn btn--ghost btn--sm" data-act="seed-demo">载入示例数据看看效果</button></div>' +
         '</div>';
@@ -207,17 +209,22 @@
     html +=
       '<div class="section-head" style="margin-top:16px">' +
       '<span>客户（' + filtered.length + '）</span>' +
-      '<span class="sub">' +
-      segButtons('sort', ui.sort, [
-        ['recent', '最近'], ['balance', '余额'], ['name', '名称']
-      ]) +
-      '</span></div>';
+      '<span class="sub">' + segButtons('sort', ui.sort, [['recent', '最近'], ['balance', '余额'], ['name', '名称']]) + '</span>' +
+      '</div>';
 
     html += '<div class="cust-list" id="cust-list">' + customerListHTML(filtered, balances, lastActive, counts) + '</div>';
 
     html += bottomNav('home');
     html += '</div>';
     return html;
+  }
+
+  function sortCustomers(list, balances, lastActive) {
+    return list.slice().sort(function (a, b) {
+      if (ui.sort === 'balance') return (balances[b.id] || 0) - (balances[a.id] || 0);
+      if (ui.sort === 'name') return a.name.localeCompare(b.name, 'zh-CN');
+      return String(lastActive[b.id] || '').localeCompare(String(lastActive[a.id] || ''));
+    });
   }
 
   function customerListHTML(list, balances, lastActive, counts) {
@@ -233,34 +240,22 @@
       var bal = balances[c.id] || 0;
       var count = counts[c.id] || 0;
       var last = lastActive[c.id];
-      var meta = count ? count + ' 笔记录 · 最近 ' + C.humanDay(C.dayKey(last), false) : '还没有记录';
+      var meta = count ? count + ' 笔 · 最近 ' + C.humanDay(C.dayKey(last), false) : '还没有记过账';
       return (
         '<a class="cust-card" href="#/c/' + encodeURIComponent(c.id) + '">' +
         '<div class="avatar ' + avatarClass(c.name) + '">' + esc(C.initialOf(c.name)) + '</div>' +
         '<div class="cust-main">' +
         '<div class="cust-name">' + esc(c.name) +
-        (bal < 0 ? '<span class="badge badge--warn">透支</span>' : '') +
-        (bal === 0 && count > 0 ? '<span class="badge">已清零</span>' : '') +
+        (bal < 0 ? '<span class="badge badge--warn">欠款</span>' : '') +
         '</div>' +
         '<div class="cust-meta">' + esc(meta) + (c.phone ? ' · ' + esc(c.phone) : '') + '</div>' +
         '</div>' +
         '<div class="cust-right">' +
         '<div class="cust-balance num ' + balanceClass(bal) + '">' + money(bal) + '</div>' +
-        '<div class="cust-tag">' + (bal > 0 ? '可用余额' : bal < 0 ? '需补款' : '—') + '</div>' +
         '</div>' +
         '</a>'
       );
     }).join('');
-  }
-
-  function segButtons(act, current, options) {
-    return (
-      '<span class="seg">' +
-      options.map(function (o) {
-        return '<button data-act="' + act + '" data-value="' + o[0] + '" class="' + (current === o[0] ? 'is-on' : '') + '">' + o[1] + '</button>';
-      }).join('') +
-      '</span>'
-    );
   }
 
   /* ================================================================ 客户详情 */
@@ -280,12 +275,10 @@
     var txns = DB.txnsOf(id);
     var balance = C.balanceOf(txns);
     var sum = C.summaryOf(txns, null);
-    var shelf = C.shelfOf(txns);
 
     var html = '<div class="shell shell--with-actions">';
-    html += topbarBack(c.name, '<button class="icon-btn" data-act="cust-menu" data-id="' + esc(c.id) + '">' + ICON.more + '</button>');
+    html += topbarBack(c.name, '<button class="icon-btn" data-act="cust-menu" data-id="' + esc(c.id) + '" aria-label="更多">' + ICON.more + '</button>');
 
-    // 余额概览
     html +=
       '<section class="card cust-hero">' +
       '<div class="cust-hero-top">' +
@@ -298,38 +291,14 @@
       '<div class="balance-label">当前余额</div>' +
       '<div class="balance-big ' + balanceClass(balance) + '"><span class="unit">' + (balance < 0 ? '−¥' : '¥') + '</span>' + C.formatCents(Math.abs(balance)) + '</div>' +
       '<dl class="mini-stats">' +
-      '<div class="mini-stat"><dt>累计存入</dt><dd class="plus">' + money(sum.deposit) + '</dd></div>' +
-      '<div class="mini-stat"><dt>累计消费</dt><dd class="minus">' + money(sum.purchase) + '</dd></div>' +
-      '<div class="mini-stat"><dt>寄售回款</dt><dd class="plus">' + money(sum.sale) + '</dd></div>' +
+      '<div class="mini-stat"><dt>累计加钱</dt><dd class="plus">' + money(sum.inflow) + '</dd></div>' +
+      '<div class="mini-stat"><dt>累计减钱</dt><dd class="minus">' + money(sum.outflow) + '</dd></div>' +
+      '<div class="mini-stat"><dt>记账笔数</dt><dd>' + sum.count + '</dd></div>' +
       '</dl>' +
       '</section>';
 
-    // 算式
     html += equationCard(txns, c.id);
 
-    // 在售
-    if (shelf.length) {
-      html +=
-        '<section class="card shelf">' +
-        '<div class="shelf-head">在售寄售 <span class="count">' + shelf.length + '</span>' +
-        '<span style="margin-left:auto;font-size:11.5px;font-weight:500;color:var(--muted)">卖出后自动入账</span></div>' +
-        shelf.map(function (item) {
-          return (
-            '<div class="shelf-item">' +
-            '<div class="shelf-item-main">' +
-            '<div class="shelf-item-name">' + esc(item.itemName || '未命名谷子') +
-            (item.category ? ' <span class="badge">' + esc(item.category) + '</span>' : '') + '</div>' +
-            '<div class="shelf-item-meta">' + C.humanDay(C.dayKey(item.at), false) + ' 抽到 · 定价 ' + money(item.price) + '</div>' +
-            '</div>' +
-            '<span class="shelf-price num">' + money(item.price) + '</span>' +
-            '<button class="btn btn--sm btn--primary" data-act="sell" data-id="' + esc(item.id) + '">卖出</button>' +
-            '</div>'
-          );
-        }).join('') +
-        '</section>';
-    }
-
-    // 时间轴
     html +=
       '<div class="section-head" style="margin-top:20px">' +
       '<span>账目明细</span>' +
@@ -340,30 +309,22 @@
     if (!groups.length) {
       html +=
         '<div class="empty" style="padding:36px 20px">' +
-        '<div class="empty-icon">📒</div><h3>还没有任何账目</h3>' +
-        '<p>下面是记账按钮，先记一笔存入吧。</p></div>';
+        '<div class="empty-icon">📒</div><h3>还没记过账</h3>' +
+        '<p>用下面的「加钱 / 减钱」记第一笔。</p></div>';
     } else {
       html += '<div class="timeline">' + groups.map(groupHTML).join('') + '</div>';
     }
 
-    // 底部操作条
     html +=
-      '<div class="action-bar"><div class="action-grid">' +
-      actionBtn('deposit', '存入', '+', 'plus') +
-      actionBtn('purchase', '消费', '−', 'minus') +
-      actionBtn('sale', '售出', '¥', 'sale') +
-      actionBtn('adjust', '调整', '±', '') +
+      '<div class="action-bar"><div class="action-grid action-grid--2">' +
+      '<button class="action-btn action-btn--big action-btn--in" data-act="new-txn" data-kind="in" data-cid="' + esc(c.id) + '">' +
+      '<span class="ico">+</span><span>加钱</span></button>' +
+      '<button class="action-btn action-btn--big action-btn--out" data-act="new-txn" data-kind="out" data-cid="' + esc(c.id) + '">' +
+      '<span class="ico">−</span><span>减钱</span></button>' +
       '</div></div>';
 
     html += '</div>';
     return html;
-
-    function actionBtn(kind, label, ico, tone) {
-      return (
-        '<button class="action-btn" data-tone="' + tone + '" data-act="new-txn" data-kind="' + kind + '" data-cid="' + esc(c.id) + '">' +
-        '<span class="ico">' + ico + '</span><span>' + label + '</span></button>'
-      );
-    }
   }
 
   function groupHTML(group) {
@@ -381,60 +342,25 @@
   }
 
   function txRowHTML(t) {
-    var tone = t.amount > 0 ? 'plus' : t.amount < 0 ? 'minus' : 'adjust';
-    var info = describeTxn(t);
+    var tone = t.amount > 0 ? 'plus' : t.amount < 0 ? 'minus' : 'zero';
     var metaParts = [];
     var sameYear = C.yearKey(t.at) === C.yearKey(C.nowStamp());
     if (ui.group === 'day') metaParts.push(C.humanTime(t.at));
     else metaParts.push(C.humanDay(C.dayKey(t.at), !sameYear) + ' ' + C.humanTime(t.at));
     if (t.operator) metaParts.push('经手 ' + esc(t.operator));
-    if (info.extraNote) metaParts.push(esc(info.extraNote));
 
     return (
       '<button class="tx' + (t.voided ? ' is-void' : '') + '" data-act="edit-txn" data-id="' + esc(t.id) + '">' +
       '<span class="tx-sign ' + tone + '">' + signed(t.amount) + '</span>' +
       '<span class="tx-main">' +
-      '<span class="tx-title">' +
-      (info.kindLabel ? '<span class="kind">' + esc(info.kindLabel) + '</span>' : '') +
-      '<span class="item">' + esc(info.main) + '</span>' +
+      '<span class="tx-title"><span class="item">' + esc(t.note || (t.amount > 0 ? '加钱' : '减钱')) + '</span>' +
       (t.voided ? ' <span class="badge badge--warn">已作废</span>' : '') +
       '</span>' +
-      '<span class="tx-meta">' +
-      (info.tag ? '<span>' + esc(info.tag) + '</span><span class="dot">·</span>' : '') +
-      metaParts.join('<span class="dot">·</span>') +
-      '</span>' +
+      '<span class="tx-meta">' + metaParts.join('<span class="dot">·</span>') + '</span>' +
       '</span>' +
       '<span class="tx-bal">' + (t.running === null || t.running === undefined ? '' : '<i>余</i>' + C.formatCents(t.running)) + '</span>' +
       '</button>'
     );
-  }
-
-  function describeTxn(t) {
-    var kindLabel = (C.KINDS[t.kind] || {}).label || '记录';
-    if (t.kind === 'purchase') {
-      var bits = [];
-      if (t.category) bits.push(t.category);
-      if (t.disposition === 'consign') bits.push('寄售 ¥' + C.formatCents(t.consignPrice));
-      else if (t.disposition === 'ship') bits.push('寄走');
-      return {
-        main: t.itemName || '抽谷消费',
-        kindLabel: kindLabel,
-        tag: bits.join(' · '),
-        extraNote: t.note
-      };
-    }
-    if (t.kind === 'sale') {
-      return {
-        main: t.itemName || '寄售商品',
-        kindLabel: '售出',
-        tag: '',
-        extraNote: t.note
-      };
-    }
-    if (t.kind === 'deposit') {
-      return { main: '存入', kindLabel: '', tag: t.note, extraNote: '' };
-    }
-    return { main: '手动调整', kindLabel: '', tag: t.note, extraNote: '' };
   }
 
   /* ================================================================ 算式卡片 */
@@ -451,7 +377,7 @@
 
     if (!terms.length) {
       return '<section class="eq-card">' + head +
-        '<div class="eq-hint" style="padding-top:2px">还没有记录，每笔存入 / 消费都会出现在这个式子里。</div>' +
+        '<div class="eq-hint" style="padding-top:2px">每笔加钱、减钱都会出现在这个式子里。</div>' +
         '</section>';
     }
 
@@ -459,13 +385,13 @@
     var expanded = !!ui.eqExpanded[custId];
     var collapsed = !expanded && terms.length > LIMIT;
 
-    var pieces = [];
+    var pieces;
     if (collapsed) {
-      pieces = terms.slice(0, 4).map(function (t) { return termHTML(t); });
+      pieces = terms.slice(0, 4).map(termHTML);
       pieces.push('<span class="eq-gap">⋯ ' + (terms.length - 8) + ' 笔 ⋯</span>');
-      pieces = pieces.concat(terms.slice(-4).map(function (t) { return termHTML(t); }));
+      pieces = pieces.concat(terms.slice(-4).map(termHTML));
     } else {
-      pieces = terms.map(function (t) { return termHTML(t); });
+      pieces = terms.map(termHTML);
     }
 
     var hint = collapsed
@@ -481,16 +407,13 @@
       '<div class="eq-tail">' +
       '<span class="eq-eq">=</span>' +
       '<span class="eq-total num">' + C.formatCents(total) + '</span>' +
-      '</div>' +
-      '</div>' +
-      hint +
+      '</div></div>' + hint +
       '</section>'
     );
   }
 
   function termHTML(t) {
-    var cls = t.amount > 0 ? 'plus' : t.amount < 0 ? 'minus' : 'plus';
-    return '<span class="eq-term ' + cls + '">' + t.text + '</span>';
+    return '<span class="eq-term ' + (t.amount > 0 ? 'plus' : 'minus') + '">' + t.text + '</span>';
   }
 
   /* ================================================================ 报表 */
@@ -511,7 +434,7 @@
     html +=
       '<header class="topbar"><div class="brand"><span class="brand-mark">谷</span>报表</div>' +
       '<div class="topbar-spacer"></div>' +
-      '<button class="icon-btn" data-act="export-csv" title="导出流水">' + ICON.download + '</button>' +
+      '<button class="icon-btn" data-act="export-csv" title="导出流水" aria-label="导出流水">' + ICON.download + '</button>' +
       '</header>';
 
     html +=
@@ -524,37 +447,34 @@
     html +=
       '<div class="kpi-grid">' +
       kpi('未兑付余额', money(total), '', customers.length + ' 位客户合计') +
-      kpi('期间净变动', signed(sum.net), sum.net >= 0 ? 'plus' : 'minus', range.label + ' · ' + sum.count + ' 笔') +
-      kpi('存入', money(sum.deposit), 'plus', '顾客充值进账') +
-      kpi('消费', money(sum.purchase), 'minus', '抽谷扣款') +
+      kpi('期间净变动', signed(sum.net), sum.net > 0 ? 'plus' : sum.net < 0 ? 'minus' : '', range.label + ' · ' + sum.count + ' 笔') +
+      kpi('加钱', money(sum.inflow), 'plus', '顾客存进来的') +
+      kpi('减钱', money(sum.outflow), 'minus', '扣掉的') +
       '</div>';
 
-    // 每日对账
     html += '<div class="section-head" style="margin-top:20px"><span>每日对账</span><span class="sub">期末余额 = 期初 + 当日净变动</span></div>';
     html +=
       '<section class="card" style="overflow:hidden">' +
       '<div class="table-scroll"><table class="report-table">' +
-      '<thead><tr><th>日期</th><th>存入</th><th>消费</th><th>售出</th><th>净变动</th><th>期末余额</th></tr></thead>' +
+      '<thead><tr><th>日期</th><th>加钱</th><th>减钱</th><th>净变动</th><th>期末余额</th></tr></thead>' +
       '<tbody>' +
       (series.opening !== 0 || range.key !== 'all'
-        ? '<tr><td class="muted">期初</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">' + C.formatCents(series.opening) + '</td></tr>'
+        ? '<tr><td class="muted">期初</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">' + C.formatCents(series.opening) + '</td></tr>'
         : '') +
       series.days.map(function (d) {
         return '<tr>' +
           '<td>' + C.humanDay(d.day, C.yearKey(d.day) !== C.yearKey(C.nowStamp())) + '</td>' +
-          '<td class="' + (d.deposit ? 'plus' : 'muted') + '">' + (d.deposit ? C.formatCents(d.deposit) : '—') + '</td>' +
-          '<td class="' + (d.purchase ? 'minus' : 'muted') + '">' + (d.purchase ? C.formatCents(d.purchase) : '—') + '</td>' +
-          '<td class="' + (d.sale ? 'plus' : 'muted') + '">' + (d.sale ? C.formatCents(d.sale) : '—') + '</td>' +
+          '<td class="' + (d.inflow ? 'plus' : 'muted') + '">' + (d.inflow ? C.formatCents(d.inflow) : '—') + '</td>' +
+          '<td class="' + (d.outflow ? 'minus' : 'muted') + '">' + (d.outflow ? C.formatCents(d.outflow) : '—') + '</td>' +
           '<td class="' + (d.net > 0 ? 'plus' : d.net < 0 ? 'minus' : 'muted') + '">' + (d.net ? signed(d.net) : '—') + '</td>' +
           '<td><b>' + C.formatCents(d.ending) + '</b></td>' +
           '</tr>';
       }).join('') +
-      (series.days.length ? '' : '<tr><td colspan="6" class="muted" style="text-align:center;padding:22px">这段时间没有流水</td></tr>') +
+      (series.days.length ? '' : '<tr><td colspan="5" class="muted" style="text-align:center;padding:22px">这段时间没有流水</td></tr>') +
       '</tbody></table></div>' +
-      '<div class="report-foot"><span>' + esc(range.label) + '合计</span><span>存入 ' + C.formatCents(sum.deposit) + ' · 消费 ' + C.formatCents(sum.purchase) + ' · 售出 ' + C.formatCents(sum.sale) + '</span></div>' +
+      '<div class="report-foot"><span>' + esc(range.label) + '合计</span><span>加钱 ' + C.formatCents(sum.inflow) + ' · 减钱 ' + C.formatCents(sum.outflow) + '</span></div>' +
       '</section>';
 
-    // 客户余额
     var ranked = customers.slice().sort(function (a, b) { return (balances[b.id] || 0) - (balances[a.id] || 0); });
     html += '<div class="section-head" style="margin-top:20px"><span>客户余额</span><span class="sub">合计 ' + money(total) + '</span></div>';
     html +=
@@ -586,15 +506,14 @@
     var kb = Math.max(1, Math.round(s.bytes / 1024));
 
     var html = '<div class="shell">';
-    html +=
-      '<header class="topbar"><div class="brand"><span class="brand-mark">谷</span>设置</div></header>';
+    html += '<header class="topbar"><div class="brand"><span class="brand-mark">谷</span>设置</div></header>';
 
     html +=
       '<div class="section-head"><span>直播间信息</span></div>' +
       '<section class="card">' +
       '<div class="set-row"><div><div class="set-label">直播间名称</div><div class="set-hint">显示在首页顶部</div></div>' +
       '<input type="text" id="set-room" value="' + esc(st.roomName) + '" placeholder="谷子直播间"></div>' +
-      '<div class="set-row"><div><div class="set-label">常用经手人</div><div class="set-hint">记账时默认填入，可临时修改</div></div>' +
+      '<div class="set-row"><div><div class="set-label">常用经手人</div><div class="set-hint">记账时默认填入</div></div>' +
       '<input type="text" id="set-operator" value="' + esc(st.defaults.operator || '') + '" placeholder="例如：小影"></div>' +
       '</section>';
 
@@ -602,18 +521,18 @@
       '<div class="section-head" style="margin-top:20px"><span>数据</span><span class="sub">共 ' + s.customers + ' 位客户 · ' + s.txns + ' 笔流水</span></div>' +
       '<section class="card">' +
       '<div class="set-row"><div><div class="set-label">备份数据</div><div class="set-hint">导出 JSON 文件，换手机或清缓存后可还原</div></div>' +
-      '<button class="btn btn--sm btn--primary" data-act="export-json">导出</button></div>' +
-      '<div class="set-row"><div><div class="set-label">恢复数据</div><div class="set-hint">从备份文件导入，可选择覆盖或合并</div></div>' +
-      '<button class="btn btn--sm btn--ghost" data-act="import-json">导入</button></div>' +
-      '<div class="set-row"><div><div class="set-label">导出流水表</div><div class="set-hint">CSV 格式，可直接用 Excel / WPS 打开</div></div>' +
-      '<button class="btn btn--sm btn--ghost" data-act="export-csv">导出</button></div>' +
+      '<button type="button" class="btn btn--sm btn--primary" data-act="export-json">导出</button></div>' +
+      '<div class="set-row"><div><div class="set-label">恢复数据</div><div class="set-hint">从备份文件导入，可选覆盖或合并</div></div>' +
+      '<button type="button" class="btn btn--sm btn--ghost" data-act="import-json">导入</button></div>' +
+      '<div class="set-row"><div><div class="set-label">导出流水表</div><div class="set-hint">CSV 格式，可用 Excel / WPS 打开</div></div>' +
+      '<button type="button" class="btn btn--sm btn--ghost" data-act="export-csv">导出</button></div>' +
       '</section>';
 
     html +=
       '<div class="section-head" style="margin-top:20px"><span>危险操作</span></div>' +
       '<section class="card">' +
       '<div class="set-row"><div><div class="set-label">清空全部数据</div><div class="set-hint">删除所有客户与流水，不可恢复</div></div>' +
-      '<button class="btn btn--sm btn--danger" data-act="clear-all">清空</button></div>' +
+      '<button type="button" class="btn btn--sm btn--danger" data-act="clear-all">清空</button></div>' +
       '</section>';
 
     html +=
@@ -621,11 +540,11 @@
       '<section class="card" style="padding:16px">' +
       '<div class="notice" style="background:var(--paper-2);color:var(--ink-2)">' +
       '<span>📌</span><span><strong>数据保存在本机浏览器。</strong>换设备、换浏览器或清除网站数据都会看不到旧账，请定期用上面的「导出」做备份。' +
-      (s.voided ? '<br>当前有 ' + s.voided + ' 笔作废记录，仍保留在明细中但不计入余额。' : '') +
+      (s.voided ? '<br>当前有 ' + s.voided + ' 笔作废记录，仍留在明细里但不计入余额。' : '') +
       '<br>数据体积约 ' + kb + ' KB。</span>' +
       '</div>' +
       '<div class="hr"></div>' +
-      '<div class="row-between small muted"><span>谷子账本 · 直播间储值记账</span><span>v1.0</span></div>' +
+      '<div class="row-between small muted"><span>谷子账本 · 简洁版</span><span>v2.0</span></div>' +
       '</section>';
 
     html += '<input type="file" id="import-file" class="file-input" accept="application/json,.json">';
@@ -644,13 +563,13 @@
     dlg.innerHTML =
       '<div class="sheet-inner">' +
       '<div class="sheet-head"><div class="sheet-title">' + esc(opts.title) + '</div>' +
-      '<button type="button" class="sheet-close" data-close>✕</button></div>' +
+      '<button type="button" class="sheet-close" data-close aria-label="关闭">✕</button></div>' +
       '<div class="sheet-body">' +
       '<form id="sheet-form" novalidate>' +
       '<div class="form-error" id="form-error"></div>' +
       opts.body +
       '<div class="sheet-actions">' +
-      (opts.cancelText ? '<button type="button" class="btn btn--ghost" data-close>' + esc(opts.cancelText) + '</button>' : '') +
+      (opts.cancelText === false ? '' : '<button type="button" class="btn btn--ghost" data-close>' + esc(opts.cancelText || '取消') + '</button>') +
       '<button type="submit" class="btn ' + (opts.tone || 'btn--primary') + '">' + esc(opts.submitLabel || '保存') + '</button>' +
       '</div>' +
       '</form></div></div>';
@@ -663,7 +582,8 @@
 
     dlg.addEventListener('click', function (e) {
       if (e.target === dlg) closeSheet();
-      if (e.target.closest('[data-close]')) closeSheet();
+      var closer = e.target.closest('[data-close]');
+      if (closer) closeSheet();
     });
     dlg.addEventListener('cancel', function (e) {
       e.preventDefault();
@@ -679,17 +599,17 @@
       if (typeof result === 'string' && result) {
         errEl.textContent = result;
         errEl.classList.add('is-on');
+        errEl.scrollIntoView({ block: 'nearest' });
         return;
       }
-      // onSubmit 里可能已经打开了另一个弹层，不能用引用判断失败
       if (openDialogEl === dlg) closeSheet();
     });
 
     if (opts.afterOpen) opts.afterOpen(form, dlg);
 
-    var firstInput = form.querySelector('input:not([type=hidden]):not([type=file])');
-    if (firstInput && window.matchMedia('(min-width: 640px)').matches) {
-      setTimeout(function () { firstInput.focus(); }, 60);
+    var firstInput = form.querySelector('input[type="text"]');
+    if (firstInput) {
+      setTimeout(function () { firstInput.focus(); }, 80);
     }
     return dlg;
   }
@@ -701,6 +621,47 @@
     } catch (e) {}
     openDialogEl.remove();
     openDialogEl = null;
+  }
+
+  /**
+   * 应用内确认框（不使用 window.confirm —— 内嵌浏览器里它会被拦截）
+   * 返回 Promise<boolean>
+   */
+  function askConfirm(opts) {
+    return new Promise(function (resolve) {
+      var dlg = document.createElement('dialog');
+      dlg.className = 'sheet sheet--confirm';
+      dlg.innerHTML =
+        '<div class="sheet-inner confirm-inner">' +
+        '<div class="confirm-title">' + esc(opts.title) + '</div>' +
+        (opts.message ? '<div class="confirm-msg">' + esc(opts.message) + '</div>' : '') +
+        '<div class="confirm-actions">' +
+        '<button type="button" class="btn btn--ghost" data-answer="no">取消</button>' +
+        '<button type="button" class="btn ' + (opts.danger ? 'btn--minus' : 'btn--primary') + '" data-answer="yes">' + esc(opts.confirmText || '确定') + '</button>' +
+        '</div></div>';
+
+      document.body.appendChild(dlg);
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+
+      function finish(answer) {
+        try {
+          if (typeof dlg.close === 'function') dlg.close();
+        } catch (e) {}
+        dlg.remove();
+        resolve(answer);
+      }
+
+      dlg.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-answer]');
+        if (btn) finish(btn.dataset.answer === 'yes');
+        else if (e.target === dlg) finish(false);
+      });
+      dlg.addEventListener('cancel', function (e) {
+        e.preventDefault();
+        finish(false);
+      });
+    });
   }
 
   function field(label, inner, opts) {
@@ -715,14 +676,14 @@
   }
 
   function textInput(name, value, placeholder, extra) {
-    return '<input type="text" name="' + name + '" value="' + esc(value || '') + '" placeholder="' + esc(placeholder || '') + '" ' + (extra || '') + '>';
+    return '<input type="text" name="' + name + '" value="' + esc(value || '') + '" placeholder="' + esc(placeholder || '') + '" autocomplete="off" ' + (extra || '') + '>';
   }
 
-  function amountField(value, placeholder, name) {
+  function amountField(value, placeholder) {
     return (
       '<div class="amount-field">' +
       '<span class="prefix">¥</span>' +
-      '<input type="text" name="' + (name || 'amount') + '" inputmode="decimal" value="' + esc(value || '') + '" placeholder="' + esc(placeholder || '0') + '" autocomplete="off">' +
+      '<input type="text" name="amount" inputmode="decimal" value="' + esc(value || '') + '" placeholder="' + esc(placeholder || '0') + '" autocomplete="off">' +
       '</div>'
     );
   }
@@ -733,18 +694,98 @@
 
   function operatorField(value) {
     var def = DB.state().defaults.operator || '';
-    return textInput('operator', value === undefined ? def : value, '谁经手的（可不填）');
+    return textInput('operator', value === undefined ? def : value, '谁记的（可不填）');
   }
 
-  function categoryChips(selected) {
-    return (
-      '<input type="hidden" name="category" value="' + esc(selected || '') + '">' +
-      '<div class="chips" data-chips="category">' +
-      C.CATEGORIES.map(function (cat) {
-        return '<button type="button" class="chip' + (selected === cat ? ' is-on' : '') + '" data-value="' + esc(cat) + '">' + esc(cat) + '</button>';
+  /* ================================================================ 记账弹层 */
+
+  function openTxnSheet(opts) {
+    var kind = opts.kind; // 'in' | 'out'
+    var customerId = opts.customerId;
+    var customer = DB.customer(customerId);
+    if (!customer) return;
+
+    var editing = opts.txn || null;
+    var t = editing || {};
+    var isIn = kind === 'in';
+
+    var timeLabel = '现在 ' + C.humanTime(C.nowStamp());
+    if (editing) {
+      timeLabel = C.humanDay(C.dayKey(t.at), C.yearKey(t.at) !== C.yearKey(C.nowStamp())) + ' ' + C.humanTime(t.at);
+    }
+
+    var body =
+      field(isIn ? '加多少钱' : '减多少钱', amountField(editing ? C.formatCents(Math.abs(t.amount)) : '', '0'), { required: true }) +
+      '<div class="quick-amounts">' +
+      [10, 20, 30, 50, 100, 200].map(function (v) {
+        return '<button type="button" class="chip" data-quick="' + v + '">' + v + '</button>';
       }).join('') +
-      '</div>'
-    );
+      '</div>' +
+      field('备注', textInput('note', t.note, '可不填，例如：抽谷 / 寄存卖出'), { hint: '选填' }) +
+      '<details class="more"' + (editing ? ' open' : '') + '>' +
+      '<summary><span>时间与经手人</span><span class="more-hint">' + esc(timeLabel) + '</span><span class="caret">⌄</span></summary>' +
+      field('时间', datetimeField(editing ? t.at : ''), { required: true }) +
+      field('经手人', operatorField(t.operator)) +
+      '</details>';
+
+    if (editing) {
+      body +=
+        '<div class="hr"></div>' +
+        '<div class="row-between">' +
+        '<button type="button" class="btn btn--sm btn--ghost" data-act="toggle-void" data-id="' + esc(t.id) + '">' +
+        (t.voided ? '恢复此记录' : '作废此记录') + '</button>' +
+        '<button type="button" class="btn btn--sm btn--danger" data-act="delete-txn" data-id="' + esc(t.id) + '">删除</button>' +
+        '</div>';
+    }
+
+    openSheet({
+      title: editing ? '修改记录' : (isIn ? '加一笔' : '减一笔'),
+      submitLabel: editing ? '保存' : (isIn ? '确认加钱' : '确认减钱'),
+      cancelText: '取消',
+      tone: isIn ? 'btn--plus' : 'btn--minus',
+      body: body,
+      afterOpen: function (form) {
+        Array.prototype.forEach.call(form.querySelectorAll('[data-quick]'), function (btn) {
+          btn.addEventListener('click', function () {
+            var input = form.querySelector('input[name="amount"]');
+            if (input) {
+              input.value = btn.dataset.quick;
+              input.focus();
+            }
+          });
+        });
+      },
+      onSubmit: function (form) {
+        var fd = new FormData(form);
+        var cents = C.parseAmountToCents(String(fd.get('amount') || '').trim());
+        if (cents === null) return '请输入正确的金额';
+        if (!cents) return '金额不能为 0';
+
+        var at = C.normStamp(fd.get('at'));
+        if (!at) return '请选择时间';
+
+        var payload = {
+          amount: Math.abs(cents),
+          at: at,
+          note: String(fd.get('note') || '').trim(),
+          operator: String(fd.get('operator') || '').trim()
+        };
+
+        var result;
+        if (editing) {
+          result = DB.updateTxn(t.id, payload);
+        } else {
+          payload.customerId = customerId;
+          payload.kind = kind;
+          result = DB.addTxn(payload);
+        }
+        if (!result.ok) return result.error;
+
+        toast(editing ? '已保存' : (isIn ? '已加 ' + C.formatCents(Math.abs(cents)) : '已减 ' + C.formatCents(Math.abs(cents))));
+        render({ keepScroll: true });
+        return null;
+      }
+    });
   }
 
   /* ================================================================ 客户弹层 */
@@ -758,14 +799,12 @@
       submitLabel: editing ? '保存' : '添加',
       cancelText: '取消',
       body:
-        field('客户名称', textInput('name', c.name, '昵称、微信名或会员号', 'autocapitalize="off"'), { required: true }) +
-        field('手机号', textInput('phone', c.phone, '选填', 'inputmode="tel"'), { hint: '选填' }) +
-        field('备注', '<textarea name="note" placeholder="选填，例如：喜欢吧唧 / 朋友介绍">' + esc(c.note) + '</textarea>', { hint: '选填' }),
+        field('客户名称', textInput('name', c.name, '昵称、微信名或编号', 'autocapitalize="off"'), { required: true }) +
+        field('备注', textInput('note', c.note, '例如：手机号后四位 / 常买什么'), { hint: '选填' }),
       onSubmit: function (form) {
         var fd = new FormData(form);
         var payload = {
           name: String(fd.get('name') || '').trim(),
-          phone: String(fd.get('phone') || '').trim(),
           note: String(fd.get('note') || '').trim()
         };
         if (!payload.name) return '请填写客户名称';
@@ -778,260 +817,13 @@
         } else {
           var res = DB.addCustomer(payload);
           if (!res.ok) return res.error;
-          toast('已添加客户');
+          toast('已添加');
           go('#/c/' + encodeURIComponent(res.customer.id));
         }
         return null;
       }
     });
   }
-
-  /* ================================================================ 记账弹层 */
-
-  function openTxnSheet(opts) {
-    var kind = opts.kind;
-    var customerId = opts.customerId;
-    var customer = DB.customer(customerId);
-    if (!customer) return;
-
-    var editing = opts.txn || null;
-    var t = editing || {};
-
-    var titles = {
-      deposit: editing ? '编辑存入' : '记一笔存入',
-      purchase: editing ? '编辑消费' : '记一笔消费',
-      sale: editing ? '编辑售出' : '记一笔寄售售出',
-      adjust: editing ? '编辑调整' : '手动调整'
-    };
-    var tones = { deposit: 'btn--plus', purchase: 'btn--minus', sale: 'btn--primary', adjust: 'btn--primary' };
-
-    var timeLabel = '现在 ' + C.humanTime(C.nowStamp());
-    if (editing) {
-      timeLabel = C.humanDay(C.dayKey(t.at), C.yearKey(t.at) !== C.yearKey(C.nowStamp())) + ' ' + C.humanTime(t.at);
-    }
-
-    // 时间 / 经手人 / 备注默认收起，记账时更快；编辑已有记录时默认展开
-    function moreFields(inner) {
-      return (
-        '<details class="more"' + (editing ? ' open' : '') + '>' +
-        '<summary><span>时间与备注</span>' +
-        '<span class="more-hint">' + esc(timeLabel) + '</span>' +
-        '<span class="caret">⌄</span></summary>' +
-        inner +
-        '</details>'
-      );
-    }
-
-    var body = '';
-
-    if (kind === 'deposit') {
-      body +=
-        field('存入金额', amountField(editing ? C.formatCents(Math.abs(t.amount)) : '', '0.00'), { required: true }) +
-        '<div class="quick-amounts">' +
-        [50, 100, 200, 500, 1000].map(function (v) {
-          return '<button type="button" class="chip" data-quick="' + v + '">' + v + ' 元</button>';
-        }).join('') +
-        '</div>' +
-        moreFields(
-          field('来源 / 备注', textInput('note', t.note, '例如：微信转账、支付宝、现金'), { hint: '选填' }) +
-          field('时间', datetimeField(editing ? t.at : ''), { required: true }) +
-          field('经手人', operatorField(t.operator))
-        );
-    }
-
-    if (kind === 'purchase') {
-      var currentAmount = editing ? C.formatCents(Math.abs(t.amount)) : '';
-      body +=
-        field('消费金额', amountField(currentAmount, '0.00'), { required: true }) +
-        field('商品名称', textInput('itemName', t.itemName, '例如：《星穹》吧唧 · 银狼'), { hint: '选填' }) +
-        field('制品类型', categoryChips(t.category), { hint: '选填' }) +
-        field('抽到的谷子怎么处理',
-          '<input type="hidden" name="disposition" value="' + esc(t.disposition || 'ship') + '">' +
-          '<div class="chips" data-chips="disposition">' +
-          '<button type="button" class="chip' + (!t.disposition || t.disposition === 'ship' ? ' is-on' : '') + '" data-value="ship">寄走</button>' +
-          '<button type="button" class="chip' + (t.disposition === 'consign' ? ' is-on' : '') + '" data-value="consign">寄售</button>' +
-          '</div>',
-          { hint: '寄售会挂到「在售」' }) +
-        '<div id="consign-wrap" style="' + (t.disposition === 'consign' ? '' : 'display:none') + '">' +
-        field('寄售定价', amountField(editing && t.consignPrice ? C.formatCents(t.consignPrice) : '', '0', 'consignPrice'), { hint: '卖出后按实际成交价入账' }) +
-        '</div>' +
-        moreFields(
-          field('备注', textInput('note', t.note, '例如：客户指定款'), { hint: '选填' }) +
-          field('时间', datetimeField(editing ? t.at : ''), { required: true }) +
-          field('经手人', operatorField(t.operator))
-        );
-    }
-
-    if (kind === 'sale') {
-      var shelf = C.shelfOf(DB.txnsOf(customerId));
-      var preset = opts.saleOf ? shelf.find(function (s) { return s.id === opts.saleOf; }) : null;
-
-      if (!editing && shelf.length) {
-        body +=
-          '<div class="field"><div class="field-label"><span>从在售货架选择</span></div>' +
-          '<select name="saleOf">' +
-          '<option value="">不关联（直接记一笔收入）</option>' +
-          shelf.map(function (s) {
-            return '<option value="' + esc(s.id) + '" data-price="' + s.price + '" data-name="' + esc(s.itemName) + '" data-category="' + esc(s.category) + '"' +
-              (preset && preset.id === s.id ? ' selected' : '') + '>' +
-              esc(s.itemName || '未命名谷子') + ' · 定价 ' + C.formatCents(s.price) + '</option>';
-          }).join('') +
-          '</select></div>';
-      }
-
-      body +=
-        field('成交金额', amountField(editing ? C.formatCents(Math.abs(t.amount)) : (preset ? C.formatCents(preset.price) : ''), '0.00'), { required: true }) +
-        field('商品名称', textInput('itemName', editing ? t.itemName : (preset ? preset.itemName : ''), '卖的哪件谷子'), { hint: '选填' }) +
-        moreFields(
-          field('备注', textInput('note', t.note, '例如：直播间卖出 / 私聊成交'), { hint: '选填' }) +
-          field('时间', datetimeField(editing ? t.at : ''), { required: true }) +
-          field('经手人', operatorField(t.operator))
-        );
-
-      if (!editing && !shelf.length) {
-        body =
-          '<div class="notice" style="margin-bottom:15px"><span>ℹ️</span><span>该客户目前没有在售的寄售品。可以直接记一笔寄售收入，也可以先到消费里把商品设为「寄售」。</span></div>' + body;
-      }
-    }
-
-    if (kind === 'adjust') {
-      var isNeg = editing ? t.amount < 0 : false;
-      body +=
-        field('调整方向',
-          '<input type="hidden" name="direction" value="' + (isNeg ? 'minus' : 'plus') + '">' +
-          '<div class="chips" data-chips="direction">' +
-          '<button type="button" class="chip' + (!isNeg ? ' is-on' : '') + '" data-value="plus">增加余额</button>' +
-          '<button type="button" class="chip' + (isNeg ? ' is-on' : '') + '" data-value="minus">减少余额</button>' +
-          '</div>') +
-        field('金额', amountField(editing ? C.formatCents(Math.abs(t.amount)) : '', '0.00'), { required: true }) +
-        field('调整原因', textInput('note', t.note, '例如：活动补差、退单更正'), { required: true }) +
-        moreFields(
-          field('时间', datetimeField(editing ? t.at : ''), { required: true }) +
-          field('经手人', operatorField(t.operator))
-        );
-    }
-
-    if (editing) {
-      body +=
-        '<div class="hr"></div>' +
-        '<div class="row-between">' +
-        '<button type="button" class="btn btn--sm btn--ghost" data-act="toggle-void" data-id="' + esc(t.id) + '">' +
-        (t.voided ? '恢复此记录' : '作废此记录') + '</button>' +
-        '<button type="button" class="btn btn--sm btn--danger" data-act="delete-txn" data-id="' + esc(t.id) + '">删除</button>' +
-        '</div>';
-    }
-
-    openSheet({
-      title: titles[kind],
-      submitLabel: editing ? '保存修改' : '记入账目',
-      cancelText: '取消',
-      tone: tones[kind],
-      body: body,
-      afterOpen: function (form) {
-        bindChips(form);
-        var dispChips = form.querySelector('[data-chips="disposition"]');
-        if (dispChips) {
-          dispChips.addEventListener('click', function (e) {
-            var btn = e.target.closest('.chip');
-            if (!btn) return;
-            var wrap = form.querySelector('#consign-wrap');
-            if (wrap) wrap.style.display = btn.dataset.value === 'consign' ? '' : 'none';
-          });
-        }
-        var saleSel = form.querySelector('select[name="saleOf"]');
-        if (saleSel) {
-          saleSel.addEventListener('change', function () {
-            var opt = saleSel.options[saleSel.selectedIndex];
-            if (!opt || !opt.value) return;
-            var price = opt.dataset.price;
-            var amountInput = form.querySelector('input[name="amount"]');
-            var nameInput = form.querySelector('input[name="itemName"]');
-            if (amountInput && price) amountInput.value = C.formatCents(+price);
-            if (nameInput) nameInput.value = opt.dataset.name || '';
-          });
-        }
-        Array.prototype.forEach.call(form.querySelectorAll('[data-quick]'), function (btn) {
-          btn.addEventListener('click', function () {
-            var amountInput = form.querySelector('input[name="amount"]');
-            if (amountInput) {
-              amountInput.value = btn.dataset.quick;
-              amountInput.focus();
-            }
-          });
-        });
-      },
-      onSubmit: function (form) {
-        var fd = new FormData(form);
-        var amountRaw = String(fd.get('amount') || '').trim();
-        var cents = C.parseAmountToCents(amountRaw);
-        if (cents === null) return '请输入正确的金额';
-        if (!cents) return '金额不能为 0';
-
-        var at = C.normStamp(fd.get('at'));
-        if (!at) return '请选择时间';
-
-        var payload = {
-          customerId: customerId,
-          kind: kind,
-          amount: Math.abs(cents),
-          at: at,
-          note: String(fd.get('note') || '').trim(),
-          operator: String(fd.get('operator') || '').trim()
-        };
-
-        if (kind === 'purchase') {
-          payload.itemName = String(fd.get('itemName') || '').trim();
-          payload.category = String(fd.get('category') || '').trim();
-          payload.disposition = String(fd.get('disposition') || '');
-          if (payload.disposition === 'consign') {
-            var cp = C.parseAmountToCents(String(fd.get('consignPrice') || '').trim());
-            if (!cp) return '选择寄售时请填写寄售价';
-            payload.consignPrice = cp;
-          }
-        }
-        if (kind === 'sale') {
-          payload.itemName = String(fd.get('itemName') || '').trim();
-          var saleOf = String(fd.get('saleOf') || '');
-          if (saleOf) payload.saleOf = saleOf;
-        }
-        if (kind === 'adjust') {
-          payload.negative = String(fd.get('direction') || 'plus') === 'minus';
-          if (!payload.note) return '请填写调整原因';
-        }
-
-        var result;
-        if (editing) {
-          delete payload.customerId;
-          delete payload.kind;
-          result = DB.updateTxn(t.id, payload);
-        } else {
-          result = DB.addTxn(payload);
-        }
-        if (!result.ok) return result.error;
-
-        toast(editing ? '已保存修改' : '已记入账目');
-        render({ keepScroll: true });
-        return null;
-      }
-    });
-  }
-
-  function bindChips(form) {
-    Array.prototype.forEach.call(form.querySelectorAll('[data-chips]'), function (group) {
-      var name = group.getAttribute('data-chips');
-      var hidden = form.querySelector('input[name="' + name + '"]');
-      group.addEventListener('click', function (e) {
-        var btn = e.target.closest('.chip');
-        if (!btn) return;
-        Array.prototype.forEach.call(group.querySelectorAll('.chip'), function (b) {
-          b.classList.toggle('is-on', b === btn);
-        });
-        if (hidden) hidden.value = btn.dataset.value;
-      });
-    });
-  }
-
-  /* ================================================================ 客户菜单 */
 
   function openCustomerMenu(id) {
     var c = DB.customer(id);
@@ -1042,11 +834,12 @@
     openSheet({
       title: c.name,
       submitLabel: '编辑资料',
+      cancelText: '关闭',
       body:
         '<div class="notice" style="margin-bottom:16px"><span>💰</span><span>当前余额 <strong>' + money(balance) + '</strong>，共 ' + txns.length + ' 笔记录。</span></div>' +
-        '<div class="sheet-actions" style="margin-top:0">' +
-        '<button type="button" class="btn btn--ghost" data-act="delete-customer" data-id="' + esc(c.id) + '">删除客户</button>' +
-        '</div>',
+        '<button type="button" class="btn btn--block btn--danger" data-act="delete-customer" data-id="' + esc(c.id) + '">' +
+        ICON.trash + ' 删除这位客户</button>' +
+        '<div class="field-label" style="margin-top:10px;font-weight:500;color:var(--muted-2)">会连同他的全部记账一起删除，不可恢复。</div>',
       onSubmit: function () {
         closeSheet();
         openCustomerSheet(c);
@@ -1068,7 +861,7 @@
     setTimeout(function () {
       URL.revokeObjectURL(url);
       a.remove();
-    }, 120);
+    }, 150);
   }
 
   function stampForFile() {
@@ -1093,29 +886,19 @@
       return;
     }
 
-    var rows = [['时间', '客户', '类型', '金额', '商品', '制品类型', '处置', '经手人', '备注', '发生后的余额']];
-    var balances = C.balanceMap(customers, DB.txns());
+    var rows = [['时间', '客户', '类型', '金额', '备注', '经手人', '发生后的余额']];
+    var running = {};
     txns.forEach(function (t) {
+      running[t.customerId] = (running[t.customerId] || 0) + t.amount;
       rows.push([
         t.at.replace('T', ' '),
         nameById[t.customerId] || '',
-        (C.KINDS[t.kind] || {}).label || t.kind,
+        t.amount > 0 ? '加钱' : '减钱',
         C.formatCents(t.amount),
-        t.itemName,
-        t.category,
-        t.disposition === 'consign' ? '寄售 ' + C.formatCents(t.consignPrice) : (C.DISPOSITIONS[t.disposition] || ''),
-        t.operator,
         t.note,
-        ''
+        t.operator,
+        C.formatCents(running[t.customerId])
       ]);
-    });
-    // 逐客户回填「发生后的余额」
-    var running = {};
-    var idx = 1;
-    txns.forEach(function (t) {
-      running[t.customerId] = (running[t.customerId] || 0) + t.amount;
-      rows[idx][9] = C.formatCents(running[t.customerId]);
-      idx += 1;
     });
 
     download('谷子账本流水-' + stampForFile() + '.csv', '\ufeff' + C.toCSV(rows), 'text/csv');
@@ -1142,21 +925,18 @@
         var counts = '（' + ((parsed.customers || []).length) + ' 位客户 / ' + ((parsed.txns || []).length) + ' 笔流水）';
         openSheet({
           title: '导入数据',
-          submitLabel: '覆盖导入',
+          submitLabel: '导入',
           cancelText: '取消',
           body:
-            '<div class="notice" style="margin-bottom:16px"><span>⚠️</span><span>文件里有 ' + counts + '。<br><strong>覆盖</strong>会清掉当前全部数据；<strong>合并</strong>会保留现有数据并追加。</span></div>' +
+            '<div class="notice" style="margin-bottom:16px"><span>⚠️</span><span>文件里有 ' + counts + '。<br><strong>合并</strong>会保留现有数据并追加；<strong>覆盖</strong>会清掉当前全部数据。</span></div>' +
+            '<input type="hidden" name="mode" value="merge">' +
             '<div class="chips" data-chips="mode">' +
             '<button type="button" class="chip is-on" data-value="merge">合并（保留现有）</button>' +
             '<button type="button" class="chip" data-value="replace">覆盖（清空现有）</button>' +
-            '</div>' +
-            '<input type="hidden" name="mode" value="merge">',
+            '</div>',
           afterOpen: bindChips,
           onSubmit: function (form) {
             var mode = form.querySelector('input[name="mode"]').value || 'merge';
-            if (mode === 'replace') {
-              if (!window.confirm('确定要用备份文件覆盖当前全部数据吗？此操作不可撤销。')) return '已取消';
-            }
             var r = DB.importJSON(text, mode);
             if (!r.ok) return r.error;
             toast(mode === 'merge' ? '已合并导入' : '已覆盖导入');
@@ -1169,6 +949,21 @@
       reader.readAsText(file, 'utf-8');
     };
     input.click();
+  }
+
+  function bindChips(form) {
+    Array.prototype.forEach.call(form.querySelectorAll('[data-chips]'), function (group) {
+      var name = group.getAttribute('data-chips');
+      var hidden = form.querySelector('input[name="' + name + '"]');
+      group.addEventListener('click', function (e) {
+        var btn = e.target.closest('.chip');
+        if (!btn) return;
+        Array.prototype.forEach.call(group.querySelectorAll('.chip'), function (b) {
+          b.classList.toggle('is-on', b === btn);
+        });
+        if (hidden) hidden.value = btn.dataset.value;
+      });
+    });
   }
 
   /* ================================================================ 事件 */
@@ -1194,32 +989,25 @@
         openCustomerMenu(id);
         break;
 
-      case 'edit-customer':
-        openCustomerSheet(DB.customer(id));
-        break;
-
       case 'delete-customer':
-        if (!window.confirm('确定删除该客户？其全部流水会一并删除，不可恢复。')) break;
-        DB.deleteCustomer(id);
+        var cName = (DB.customer(id) || {}).name || '该客户';
         closeSheet();
-        toast('已删除客户');
-        go('#/');
-        render();
+        askConfirm({
+          title: '删除「' + cName + '」？',
+          message: '他的全部记账记录会一起删除，无法恢复。',
+          confirmText: '删除',
+          danger: true
+        }).then(function (yes) {
+          if (!yes) return;
+          DB.deleteCustomer(id);
+          toast('已删除');
+          go('#/');
+          render();
+        });
         break;
 
       case 'new-txn':
-        openTxnSheet({
-          kind: target.getAttribute('data-kind'),
-          customerId: target.getAttribute('data-cid')
-        });
-        break;
-
-      case 'sell':
-        openTxnSheet({
-          kind: 'sale',
-          customerId: parseRoute().id,
-          saleOf: id
-        });
+        openTxnSheet({ kind: target.getAttribute('data-kind'), customerId: target.getAttribute('data-cid') });
         break;
 
       case 'edit-txn':
@@ -1231,17 +1019,24 @@
         var cur = DB.txn(id);
         if (!cur) break;
         DB.setVoid(id, !cur.voided);
-        toast(cur.voided ? '已恢复该记录' : '已作废该记录');
+        toast(cur.voided ? '已恢复' : '已作废');
         closeSheet();
         render({ keepScroll: true });
         break;
 
       case 'delete-txn':
-        if (!window.confirm('确定永久删除这条流水？')) break;
-        DB.deleteTxn(id);
-        toast('已删除');
-        closeSheet();
-        render({ keepScroll: true });
+        askConfirm({
+          title: '删除这条记录？',
+          message: '删除后无法恢复。如果是记错了金额，也可以先「作废」保留痕迹。',
+          confirmText: '删除',
+          danger: true
+        }).then(function (yes) {
+          if (!yes) return;
+          DB.deleteTxn(id);
+          toast('已删除');
+          closeSheet();
+          render({ keepScroll: true });
+        });
         break;
 
       case 'eq-toggle':
@@ -1272,11 +1067,18 @@
         break;
 
       case 'seed-demo':
-        if (!window.confirm('载入示例数据用于体验？会覆盖当前全部数据。')) break;
-        DB.seedDemo();
-        toast('已载入示例数据');
-        go('#/');
-        render();
+        askConfirm({
+          title: '载入示例数据？',
+          message: '会覆盖当前全部数据，仅用于体验界面。',
+          confirmText: '载入',
+          danger: true
+        }).then(function (yes) {
+          if (!yes) return;
+          DB.seedDemo();
+          toast('已载入示例数据');
+          go('#/');
+          render();
+        });
         break;
 
       case 'export-json':
@@ -1292,12 +1094,25 @@
         break;
 
       case 'clear-all':
-        if (!window.confirm('确定清空全部客户和流水？建议先导出备份。')) break;
-        if (!window.confirm('再确认一次：此操作不可恢复。')) break;
-        DB.clearAll();
-        toast('已清空');
-        go('#/');
-        render();
+        askConfirm({
+          title: '清空全部数据？',
+          message: '所有客户和记账记录都会被删除，无法恢复。建议先导出一份备份。',
+          confirmText: '继续'
+        }).then(function (yes) {
+          if (!yes) return;
+          return askConfirm({
+            title: '再确认一次',
+            message: '确定要清空吗？这个操作不可撤销。',
+            confirmText: '确定清空',
+            danger: true
+          }).then(function (yes2) {
+            if (!yes2) return;
+            DB.clearAll();
+            toast('已清空');
+            go('#/');
+            render();
+          });
+        });
         break;
     }
   });
@@ -1318,16 +1133,10 @@
     var balances = C.balanceMap(customers, txns);
     var lastActive = C.lastActivityMap(txns);
     var counts = C.countMap(txns);
-    var filtered = C.searchCustomers(customers, ui.search);
-    filtered.sort(function (a, b) {
-      if (ui.sort === 'balance') return (balances[b.id] || 0) - (balances[a.id] || 0);
-      if (ui.sort === 'name') return a.name.localeCompare(b.name, 'zh-CN');
-      return String(lastActive[b.id] || '').localeCompare(String(lastActive[a.id] || ''));
-    });
+    var filtered = sortCustomers(C.searchCustomers(customers, ui.search), balances, lastActive);
     container.innerHTML = customerListHTML(filtered, balances, lastActive, counts);
   }
 
-  // 设置页输入
   document.addEventListener('change', function (e) {
     var el = e.target;
     if (!el || !el.id) return;
@@ -1341,13 +1150,10 @@
     }
   });
 
-  // 键盘快捷键：n 新建客户
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeSheet();
-    if (openDialogEl) return;
     var tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-    if (e.key === 'n' && parseRoute().view === 'home') {
+    if (e.key === 'n' && parseRoute().view === 'home' && !document.querySelector('dialog[open]')) {
       e.preventDefault();
       openCustomerSheet(null);
     }
@@ -1361,8 +1167,8 @@
 
   function shouldWarnBackup() {
     var st = DB.state();
-    var last = st.defaults.lastBackupAt;
     if (!DB.txns().length) return false;
+    var last = st.defaults.lastBackupAt;
     if (!last) return true;
     return C.daysBetween(C.dayKey(last), C.dayKey(C.nowStamp())) >= 7;
   }
@@ -1371,7 +1177,6 @@
 
   DB.init();
 
-  // 首次访问且 ?demo=1 时载入示例
   if (!DB.customers().length && /[?&]demo=1\b/.test(location.search)) {
     DB.seedDemo();
   }

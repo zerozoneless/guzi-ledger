@@ -1,5 +1,6 @@
 /*!
- * 谷子账本 · 核心计算层
+ * 谷子账本 · 核心计算层（简洁版）
+ * 只记一件事：某位顾客的余额加了多少、减了多少。
  * 纯函数，不依赖 DOM。浏览器挂到 window.HXCore，Node 下可 require 用于单元测试。
  *
  * 金额一律用「分」(整数) 存储与计算，避免浮点误差。
@@ -13,19 +14,10 @@
 
   /* ---------------------------------------------------------------- 常量 */
 
-  var CATEGORIES = ['吧唧', '拍立得', '立牌', '挂件', '毛绒', '卡片', '亚克力', '其他'];
-
-  // sign 仅用于「新增时金额应该取什么符号」，实际符号以流水 amount 为准
+  // 只有两种流水：加钱、减钱。amount 带符号存储（加为正、减为负）。
   var KINDS = {
-    deposit: { key: 'deposit', label: '存入', short: '存', tone: 'plus', sign: 1 },
-    purchase: { key: 'purchase', label: '消费', short: '消', tone: 'minus', sign: -1 },
-    sale: { key: 'sale', label: '寄售售出', short: '售', tone: 'plus', sign: 1 },
-    adjust: { key: 'adjust', label: '手动调整', short: '调', tone: 'neutral', sign: 0 }
-  };
-
-  var DISPOSITIONS = {
-    ship: '寄走',
-    consign: '寄售'
+    in: { key: 'in', label: '加钱', short: '加', sign: 1 },
+    out: { key: 'out', label: '减钱', short: '减', sign: -1 }
   };
 
   var WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -128,8 +120,7 @@
   function relativeDayLabel(key, todayStamp) {
     var today = dayKey(todayStamp || nowStamp());
     if (key === today) return '今天';
-    var yd = addDays(today, -1);
-    if (key === yd) return '昨天';
+    if (key === addDays(today, -1)) return '昨天';
     return humanDay(key, yearKey(key) !== yearKey(today)) + ' ' + weekdayCN(key + 'T00:00');
   }
 
@@ -180,7 +171,7 @@
     return (n < 0 ? '−¥' : '¥') + formatCents(Math.abs(n));
   }
 
-  /** 分 → "+30" / "−15" / "±0" */
+  /** 分 → "+30" / "−15" / "0" */
   function formatSigned(cents) {
     var n = Math.round(Number(cents) || 0);
     if (n === 0) return '0';
@@ -215,9 +206,7 @@
       return {
         id: t.id,
         amount: Number(t.amount) || 0,
-        kind: t.kind,
         text: formatSigned(Number(t.amount) || 0),
-        label: (KINDS[t.kind] || { label: '记录' }).label,
         at: t.at
       };
     });
@@ -228,18 +217,15 @@
    * range: { from, to } 天键，或 null 表示全部
    */
   function summaryOf(txns, range) {
-    var out = { deposit: 0, purchase: 0, sale: 0, adjust: 0, net: 0, count: 0 };
+    var out = { inflow: 0, outflow: 0, net: 0, count: 0 };
     liveTxns(txns).forEach(function (t) {
       if (!inRange(t, range)) return;
       var amt = Number(t.amount) || 0;
       out.count += 1;
       out.net += amt;
-      if (t.kind === 'deposit') out.deposit += amt;
-      else if (t.kind === 'purchase') out.purchase += Math.abs(amt);
-      else if (t.kind === 'sale') out.sale += amt;
-      else out.adjust += amt;
+      if (amt > 0) out.inflow += amt;
+      else out.outflow += Math.abs(amt);
     });
-    out.purchase = Math.abs(out.purchase);
     return out;
   }
 
@@ -294,7 +280,6 @@
   /**
    * 时间轴分组（倒序：最新在前）
    * 作废记录也保留在时间轴上（灰色显示）但不参与金额计算。
-   * 每组带 subtotal（本期有效合计）与 ending（该组结束时的余额）
    */
   function groupsOf(txns, mode, todayStamp) {
     var all = (txns || []).slice().sort(byTimeAsc);
@@ -321,61 +306,6 @@
     return list;
   }
 
-  /** 每笔流水发生后的余额 */
-  function runningMap(txns) {
-    var map = {};
-    var running = 0;
-    liveTxns(txns).forEach(function (t) {
-      running += Number(t.amount) || 0;
-      map[t.id] = running;
-    });
-    return map;
-  }
-
-  /* ---------------------------------------------------------------- 寄售 */
-
-  /** 已售出的消费单 id 集合（寄售售出流水通过 saleOf 关联） */
-  function soldPurchaseIds(txns) {
-    var set = {};
-    liveTxns(txns).forEach(function (t) {
-      if (t.kind === 'sale' && t.saleOf) set[t.saleOf] = true;
-    });
-    return set;
-  }
-
-  /** 在售货架：已定寄售价但尚未售出的消费单 */
-  function shelfOf(txns) {
-    var sold = soldPurchaseIds(txns);
-    return liveTxns(txns)
-      .filter(function (t) {
-        return t.kind === 'purchase' && t.disposition === 'consign' && !sold[t.id];
-      })
-      .map(function (t) {
-        return Object.assign({}, t, { price: Number(t.consignPrice) || 0 });
-      })
-      .reverse();
-  }
-
-  /** 已售出的寄售品（带卖出时间与金额） */
-  function soldConsignments(txns) {
-    var purchases = {};
-    (txns || []).forEach(function (t) {
-      if (t.kind === 'purchase') purchases[t.id] = t;
-    });
-    return liveTxns(txns)
-      .filter(function (t) { return t.kind === 'sale' && t.saleOf && purchases[t.saleOf]; })
-      .map(function (t) {
-        var p = purchases[t.saleOf];
-        return {
-          sale: t,
-          purchase: p,
-          price: Number(t.amount) || 0,
-          cost: Math.abs(Number(p.amount) || 0)
-        };
-      })
-      .reverse();
-  }
-
   /* ---------------------------------------------------------------- 每日对账 */
 
   /**
@@ -392,25 +322,19 @@
         return;
       }
       if (range && range.to && key > range.to) return;
-      if (!buckets[key]) {
-        buckets[key] = { day: key, deposit: 0, purchase: 0, sale: 0, adjust: 0, net: 0, count: 0 };
-      }
+      if (!buckets[key]) buckets[key] = { day: key, inflow: 0, outflow: 0, net: 0, count: 0 };
       var b = buckets[key];
       var amt = Number(t.amount) || 0;
       b.count += 1;
       b.net += amt;
-      if (t.kind === 'deposit') b.deposit += amt;
-      else if (t.kind === 'purchase') b.purchase += Math.abs(amt);
-      else if (t.kind === 'sale') b.sale += amt;
-      else b.adjust += amt;
-      if (!b.from) b.from = t.at;
-      b.to = t.at;
+      if (amt > 0) b.inflow += amt;
+      else b.outflow += Math.abs(amt);
     });
 
     var days = [];
     var today = dayKey(nowStamp());
-    // 只有「今日 / 本周 / 本月」需要把没有流水的日子补出来（方便逐日对账）；
-    // 「今年 / 全部」只列出真正有流水的日子，避免几百行空白。
+    // 今日 / 本周 / 本月要把没流水的日子补出来，方便逐日对账；
+    // 今年 / 全部只列出真正有流水的日子，避免几百行空白。
     var shouldFill = range && range.key !== 'year' && range.key !== 'all';
     var fillTo = range && range.to ? (range.to < today ? range.to : today) : null;
 
@@ -427,6 +351,7 @@
         days.push(buildDayRow(k, buckets[k]));
       });
     }
+
     var running = opening;
     days.forEach(function (row) {
       running += row.net;
@@ -439,10 +364,8 @@
     b = b || {};
     return {
       day: key,
-      deposit: b.deposit || 0,
-      purchase: b.purchase || 0,
-      sale: b.sale || 0,
-      adjust: b.adjust || 0,
+      inflow: b.inflow || 0,
+      outflow: b.outflow || 0,
       net: b.net || 0,
       count: b.count || 0,
       ending: 0
@@ -469,7 +392,7 @@
     var kw = String(keyword || '').trim().toLowerCase();
     if (!kw) return customers.slice();
     return customers.filter(function (c) {
-      var hay = [c.name, c.phone, c.note, (c.aliases || []).join(' ')].join(' ').toLowerCase();
+      var hay = [c.name, c.phone, c.note].join(' ').toLowerCase();
       return hay.indexOf(kw) !== -1;
     });
   }
@@ -500,8 +423,6 @@
     return map;
   }
 
-  /* ---------------------------------------------------------------- 头像用字 */
-
   /** 头像显示：中文取首字，英文取首字母 */
   function initialOf(name) {
     var s = String(name || '').trim();
@@ -511,12 +432,8 @@
     return first;
   }
 
-  /* ---------------------------------------------------------------- 导出 */
-
   return {
-    CATEGORIES: CATEGORIES,
     KINDS: KINDS,
-    DISPOSITIONS: DISPOSITIONS,
     uid: uid,
     esc: esc,
     normStamp: normStamp,
@@ -546,10 +463,6 @@
     keyOfMode: keyOfMode,
     groupLabel: groupLabel,
     groupsOf: groupsOf,
-    runningMap: runningMap,
-    soldPurchaseIds: soldPurchaseIds,
-    shelfOf: shelfOf,
-    soldConsignments: soldConsignments,
     dailySeries: dailySeries,
     toCSV: toCSV,
     csvCell: csvCell,

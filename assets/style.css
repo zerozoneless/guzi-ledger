@@ -306,6 +306,7 @@ h1, h2, h3, h4, p { margin: 0; }
   transition: filter 0.15s, transform 0.1s, background 0.15s;
   white-space: nowrap;
 }
+.btn svg { width: 17px; height: 17px; flex: none; }
 .btn:active { transform: scale(0.975); }
 .btn:hover { filter: brightness(0.97); }
 
@@ -395,16 +396,16 @@ h1, h2, h3, h4, p { margin: 0; }
 }
 
 .eq {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-num);
-  font-size: 19px; font-weight: 700;
+  font-size: 17px; font-weight: 700;
   letter-spacing: -0.5px;
   white-space: nowrap;
   padding-bottom: 2px;
 }
 .eq-term {
   display: inline-flex; align-items: center;
-  padding: 3px 8px; border-radius: 9px;
+  padding: 3px 7px; border-radius: 8px;
   font-variant-numeric: tabular-nums;
 }
 .eq-term.plus { color: #8fd8b0; background: rgba(143, 216, 176, 0.1); }
@@ -420,9 +421,9 @@ h1, h2, h3, h4, p { margin: 0; }
   display: flex; align-items: center; gap: 7px;
   padding-right: 16px;
 }
-.eq-eq { color: rgba(246, 242, 233, 0.4); font-weight: 500; font-size: 19px; }
+.eq-eq { color: rgba(246, 242, 233, 0.4); font-weight: 500; font-size: 17px; }
 .eq-total {
-  color: #f6f2e9; font-size: 22px;
+  color: #f6f2e9; font-size: 20px;
   padding: 3px 10px; border-radius: 9px;
   background: rgba(246, 242, 233, 0.1);
   border: 1px solid rgba(246, 242, 233, 0.14);
@@ -435,37 +436,6 @@ h1, h2, h3, h4, p { margin: 0; }
   display: flex; align-items: center; gap: 10px;
 }
 .eq-hint button { color: rgba(246, 242, 233, 0.72); text-decoration: underline; font-size: 11.5px; }
-
-/* ---- 在售货架 ---- */
-
-.shelf { margin-top: 14px; overflow: hidden; }
-.shelf-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 13px 16px 11px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13.5px; font-weight: 700;
-}
-.shelf-head .count {
-  font-size: 11px; font-weight: 700; color: var(--accent);
-  background: var(--accent-soft); border-radius: 999px;
-  padding: 1px 7px;
-}
-.shelf-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
-}
-.shelf-item:last-child { border-bottom: none; }
-.shelf-item-main { flex: 1; min-width: 0; }
-.shelf-item-name {
-  font-size: 14px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.shelf-item-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.shelf-price {
-  font-size: 15px; font-weight: 700; color: var(--plus);
-  font-variant-numeric: tabular-nums; flex: none;
-}
 
 /* ---- 时间轴 ---- */
 
@@ -599,6 +569,7 @@ h1, h2, h3, h4, p { margin: 0; }
   border-top: 1px solid var(--line);
 }
 .action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 760px; margin: 0 auto; }
+.action-grid--2 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .action-btn {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 8px 0 6px;
@@ -611,7 +582,25 @@ h1, h2, h3, h4, p { margin: 0; }
 .action-btn .ico { font-size: 15px; line-height: 1; font-weight: 800; }
 .action-btn[data-tone="plus"] { background: var(--plus-soft); color: var(--plus); }
 .action-btn[data-tone="minus"] { background: var(--minus-soft); color: var(--minus); }
-.action-btn[data-tone="sale"] { background: var(--accent-soft); color: var(--accent); }
+
+.action-btn--big {
+  flex-direction: row; gap: 8px;
+  height: 52px; padding: 0;
+  border-radius: 15px;
+  font-size: 16px; font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.action-btn--big .ico { font-size: 20px; }
+.action-btn--in {
+  background: var(--plus); color: #fff;
+  box-shadow: 0 6px 18px rgba(47, 125, 88, 0.26);
+}
+.action-btn--out {
+  background: var(--minus); color: #fff;
+  box-shadow: 0 6px 18px rgba(190, 74, 54, 0.26);
+}
+.action-btn--in:active { background: #266a4a; }
+.action-btn--out:active { background: #a63d2c; }
 
 /* ---------------------------------------------------------------- 报表 */
 
@@ -827,7 +816,7 @@ dialog.sheet::backdrop {
 .chip.is-on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .chip:hover { border-color: var(--line-strong); }
 
-.quick-amounts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.quick-amounts { display: flex; gap: 6px; margin-top: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 
 /* 可折叠的「时间与备注」 */
 .more {
@@ -921,6 +910,41 @@ dialog.sheet::backdrop {
   font-size: 12.5px; line-height: 1.6;
 }
 .notice strong { font-weight: 700; }
+
+/* 确认框（不用 window.confirm，内嵌浏览器会拦截） */
+dialog.sheet--confirm {
+  width: min(90vw, 350px);
+  max-width: 350px;
+  margin: auto;
+  align-self: center;
+}
+.sheet--confirm .confirm-inner {
+  border-radius: 22px;
+  padding: 0;
+  animation: pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: visible;
+}
+@keyframes pop-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.confirm-title {
+  font-size: 17px; font-weight: 700;
+  padding: 24px 22px 0;
+  text-align: center;
+  line-height: 1.4;
+}
+.confirm-msg {
+  font-size: 13.5px; color: var(--muted);
+  line-height: 1.65;
+  padding: 9px 22px 0;
+  text-align: center;
+}
+.confirm-actions {
+  display: flex; gap: 9px;
+  padding: 22px;
+}
+.confirm-actions .btn { flex: 1; height: 44px; }
 
 /* 桌面端：弹层居中 */
 @media (min-width: 640px) {

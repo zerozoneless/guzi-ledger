@@ -1,6 +1,6 @@
 /**
- * 核心计算单元测试
- * 运行：node --test test/
+ * 核心计算单元测试（简洁版）
+ * 运行：node --test test/core.test.js
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -79,15 +79,10 @@ function txn(id, at, amount, extra) {
       customerId: 'c1',
       at,
       createdAt: at,
-      kind: amount > 0 ? 'deposit' : 'purchase',
+      kind: amount > 0 ? 'in' : 'out',
       amount,
-      itemName: '',
-      category: '',
-      disposition: '',
-      consignPrice: 0,
-      saleOf: '',
-      operator: '',
       note: '',
+      operator: '',
       voided: false,
       voidedAt: ''
     },
@@ -97,9 +92,9 @@ function txn(id, at, amount, extra) {
 
 test('用户给的例子：30 - 15 + 8 = 23', () => {
   const txns = [
-    txn('t1', '2026-10-10T20:00', 3000, { kind: 'deposit' }),
-    txn('t2', '2026-10-11T21:00', -1500, { kind: 'purchase', itemName: '吧唧' }),
-    txn('t3', '2026-10-12T22:00', 800, { kind: 'sale', itemName: '吧唧', saleOf: 't2' })
+    txn('t1', '2026-10-10T20:00', 3000),
+    txn('t2', '2026-10-11T21:00', -1500),
+    txn('t3', '2026-10-12T22:00', 800)
   ];
   assert.equal(C.balanceOf(txns), 2300);
   assert.equal(C.formatCents(C.balanceOf(txns)), '23');
@@ -119,29 +114,26 @@ test('作废的记录不计入余额，但仍留在时间轴上', () => {
   const groups = C.groupsOf(txns, 'day', '2026-10-12T00:00');
   const items = groups.flatMap((g) => g.items);
   assert.equal(items.length, 2, '作废记录也应在时间轴上出现');
-  const voided = items.find((i) => i.voided);
-  assert.equal(voided.running, null, '作废记录不显示运行余额');
-  const live = items.find((i) => !i.voided);
-  assert.equal(live.running, 3000);
+  assert.equal(items.find((i) => i.voided).running, null, '作废记录不显示运行余额');
+  assert.equal(items.find((i) => !i.voided).running, 3000);
 });
 
-test('summaryOf 按期间统计存入/消费/售出', () => {
+test('summaryOf 按期间统计加钱/减钱', () => {
   const txns = [
-    txn('t1', '2026-10-10T20:00', 3000, { kind: 'deposit' }),
-    txn('t2', '2026-11-01T21:00', -1500, { kind: 'purchase' }),
-    txn('t3', '2026-11-02T22:00', 800, { kind: 'sale' }),
-    txn('t4', '2026-11-03T22:00', -200, { kind: 'adjust' })
+    txn('t1', '2026-10-10T20:00', 3000),
+    txn('t2', '2026-11-01T21:00', -1500),
+    txn('t3', '2026-11-02T22:00', 800),
+    txn('t4', '2026-11-03T22:00', -200)
   ];
   const nov = C.summaryOf(txns, C.rangeOf('month', '2026-11-13T00:00'));
-  assert.equal(nov.deposit, 0);
-  assert.equal(nov.purchase, 1500);
-  assert.equal(nov.sale, 800);
-  assert.equal(nov.adjust, -200);
+  assert.equal(nov.inflow, 800);
+  assert.equal(nov.outflow, 1700);
   assert.equal(nov.net, -900);
   assert.equal(nov.count, 3);
 
   const all = C.summaryOf(txns, null);
-  assert.equal(all.deposit, 3000);
+  assert.equal(all.inflow, 3800);
+  assert.equal(all.outflow, 1700);
   assert.equal(all.net, 2100);
 });
 
@@ -158,59 +150,34 @@ test('分组：按日 / 按月 / 按年，且是最新在前', () => {
   assert.equal(byDay[2].ending, 3000);
   assert.equal(byDay[0].ending, 2000);
 
-  const byMonth = C.groupsOf(txns, 'month', '2026-11-13T12:00');
-  assert.deepEqual(byMonth.map((g) => g.key), ['2026-11', '2026-10']);
+  assert.deepEqual(C.groupsOf(txns, 'month', '2026-11-13T12:00').map((g) => g.key), ['2026-11', '2026-10']);
 
   const byYear = C.groupsOf(txns, 'year', '2026-11-13T12:00');
   assert.deepEqual(byYear.map((g) => g.key), ['2026']);
   assert.equal(byYear[0].subtotal, 2000);
 });
 
-test('寄售货架：定价后进入在售，售出后离开', () => {
-  const p = txn('p1', '2026-10-11T21:00', -1500, {
-    kind: 'purchase',
-    itemName: '吧唧',
-    disposition: 'consign',
-    consignPrice: 800
-  });
-  const txns = [txn('t1', '2026-10-10T20:00', 3000), p];
-
-  assert.equal(C.shelfOf(txns).length, 1);
-  assert.equal(C.shelfOf(txns)[0].price, 800);
-
-  const sold = txns.concat([txn('s1', '2026-10-12T22:00', 800, { kind: 'sale', saleOf: 'p1' })]);
-  assert.equal(C.shelfOf(sold).length, 0);
-
-  // 售出记录作废后，商品应回到在售
-  const voidedSale = sold.map((t) => (t.id === 's1' ? Object.assign({}, t, { voided: true }) : t));
-  assert.equal(C.shelfOf(voidedSale).length, 1);
-});
-
-test('寄走的不进在售货架', () => {
-  const txns = [
-    txn('p1', '2026-10-11T21:00', -1500, {
-      kind: 'purchase',
-      disposition: 'ship',
-      itemName: '拍立得'
-    })
-  ];
-  assert.equal(C.shelfOf(txns).length, 0);
-});
-
 test('每日对账：期初 + 每日净变动 = 期末', () => {
   const txns = [
-    txn('t1', '2026-10-05T20:00', 3000, { kind: 'deposit' }),
-    txn('t2', '2026-11-01T21:00', -1500, { kind: 'purchase' }),
-    txn('t3', '2026-11-01T22:00', 500, { kind: 'deposit' }),
-    txn('t4', '2026-11-03T22:00', -300, { kind: 'purchase' })
+    txn('t1', '2026-10-05T20:00', 3000),
+    txn('t2', '2026-11-01T21:00', -1500),
+    txn('t3', '2026-11-01T22:00', 500),
+    txn('t4', '2026-11-03T22:00', -300)
   ];
   const series = C.dailySeries(txns, C.rangeOf('month', '2026-11-13T00:00'));
 
-  assert.equal(series.opening, 3000, '11 月之前只发生了 10-05 的存入');
-  assert.equal(series.days.length, 13, '只补到今天（11-13），不补未来日期');
+  assert.equal(series.opening, 3000, '11 月之前只发生了 10-05 的加钱');
+  // 只补到今天，不补未来日期（用真实今天推算，避免测试随日期失效）
+  const today = C.dayKey(C.nowStamp());
+  const expectLast = today < '2026-11-30' ? today : '2026-11-30';
+  assert.equal(series.days[0].day, '2026-11-01');
+  assert.equal(series.days[series.days.length - 1].day, expectLast);
+  assert.ok(series.days.every((d) => d.day <= today), '不应出现未来日期');
 
   const d1 = series.days.find((d) => d.day === '2026-11-01');
   assert.equal(d1.net, -1000);
+  assert.equal(d1.inflow, 500);
+  assert.equal(d1.outflow, 1500);
   assert.equal(d1.ending, 2000);
 
   const d2 = series.days.find((d) => d.day === '2026-11-02');
@@ -222,20 +189,18 @@ test('每日对账：期初 + 每日净变动 = 期末', () => {
 });
 
 test('每日对账：全年视图只列出有流水的日子', () => {
-  const txns = [
-    txn('t1', '2026-03-01T20:00', 3000),
-    txn('t2', '2026-11-01T21:00', -1500)
-  ];
+  const txns = [txn('t1', '2026-03-01T20:00', 3000), txn('t2', '2026-11-01T21:00', -1500)];
   const series = C.dailySeries(txns, C.rangeOf('year', '2026-11-13T00:00'));
   assert.deepEqual(series.days.map((d) => d.day), ['2026-03-01', '2026-11-01']);
   assert.equal(series.opening, 0);
   assert.equal(series.closing, 1500);
 });
 
-test('余额可以为负（透支）', () => {
+test('余额可以为负（欠款）', () => {
   const txns = [txn('t1', '2026-10-10T20:00', 1000), txn('t2', '2026-10-11T20:00', -1500)];
   assert.equal(C.balanceOf(txns), -500);
   assert.equal(C.formatSigned(-500), '−5');
+  assert.equal(C.formatMoney(-500), '−¥5');
 });
 
 /* ------------------------------------------------------------------ 客户与导出 */

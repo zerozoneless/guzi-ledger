@@ -687,6 +687,7 @@ h1, h2, h3, h4, p { margin: 0; }
   border-bottom: 1px solid var(--line);
 }
 .set-row:last-child { border-bottom: none; }
+.set-row > div { flex: 1; min-width: 0; }
 .set-label { font-size: 14px; font-weight: 600; }
 .set-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .set-row input[type="text"] {

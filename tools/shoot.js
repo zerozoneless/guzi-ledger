@@ -140,6 +140,8 @@ function cdpConnection(wsUrl) {
 
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: args.w,
       height: args.h,
